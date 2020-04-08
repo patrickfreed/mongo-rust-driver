@@ -40,6 +40,20 @@ impl From<ReadPreference> for SelectionCriteria {
     }
 }
 
+impl<T> From<T> for SelectionCriteria
+where T: 'static + Send + Sync + Fn(&ServerInfo) -> bool
+{
+    fn from(predicate: T) -> Self {
+        Self::Predicate(Arc::new(predicate))
+    }
+}
+
+// impl From<Predicate> for SelectionCriteria {
+//     fn from(predicate: Predicate) -> Self {
+//         Self::Predicate(predicate)
+//     }
+// }
+
 impl SelectionCriteria {
     pub(crate) fn as_read_pref(&self) -> Option<&ReadPreference> {
         match self {

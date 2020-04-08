@@ -3,7 +3,7 @@ use bson::{doc, Document};
 use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
-    operation::{ListCollections, Operation},
+    operation::{ListCollections, Operation, OperationContext},
     options::{ListCollectionsOptions, StreamAddress},
     Namespace,
 };
@@ -172,10 +172,10 @@ async fn handle_success() {
     };
 
     let cursor_spec = list_collections
-        .handle_response(CommandResponse::with_document_and_address(
-            StreamAddress::default(),
-            response.clone(),
-        ))
+        .handle_response(
+            CommandResponse::with_document_and_address(StreamAddress::default(), response.clone()),
+            OperationContext::default(),
+        )
         .expect("handle should succeed");
 
     assert_eq!(cursor_spec.address, StreamAddress::default());
@@ -194,10 +194,10 @@ async fn handle_success() {
         Some(ListCollectionsOptions::builder().batch_size(123).build()),
     );
     let cursor_spec = list_collections
-        .handle_response(CommandResponse::with_document_and_address(
-            StreamAddress::default(),
-            response,
-        ))
+        .handle_response(
+            CommandResponse::with_document_and_address(StreamAddress::default(), response),
+            OperationContext::default(),
+        )
         .expect("handle should succeed");
 
     assert_eq!(cursor_spec.address, StreamAddress::default());
@@ -217,7 +217,10 @@ async fn handle_invalid_response() {
 
     let garbled = doc! { "asdfasf": "ASdfasdf" };
     assert!(list_collections
-        .handle_response(CommandResponse::with_document(garbled))
+        .handle_response(
+            CommandResponse::with_document(garbled),
+            OperationContext::default()
+        )
         .is_err());
 
     let missing_cursor_field = doc! {
@@ -227,6 +230,9 @@ async fn handle_invalid_response() {
         }
     };
     assert!(list_collections
-        .handle_response(CommandResponse::with_document(missing_cursor_field))
+        .handle_response(
+            CommandResponse::with_document(missing_cursor_field),
+            OperationContext::default()
+        )
         .is_err());
 }

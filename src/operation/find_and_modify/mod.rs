@@ -19,7 +19,7 @@ use crate::{
         Namespace,
     },
     error::{ErrorKind, Result},
-    operation::{append_options, Operation},
+    operation::{append_options, Operation, OperationContext},
 };
 
 pub(crate) struct FindAndModify {
@@ -88,7 +88,11 @@ impl Operation for FindAndModify {
             body,
         ))
     }
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         let body: ResponseBody = response.body()?;
         match body.value {
             Bson::Document(doc) => Ok(Some(doc)),

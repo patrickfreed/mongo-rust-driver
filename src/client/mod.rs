@@ -1,17 +1,19 @@
 pub mod auth;
 mod executor;
 pub mod options;
+mod session;
 
 use std::{sync::Arc, time::Duration};
 
 use time::PreciseTime;
 
-use bson::{Bson, Document};
+use bson::{doc, Bson, Document};
 use derivative::Derivative;
 
 #[cfg(test)]
 use crate::options::StreamAddress;
 use crate::{
+    cmap::Command,
     concern::{ReadConcern, WriteConcern},
     db::Database,
     error::{ErrorKind, Result},
@@ -20,6 +22,8 @@ use crate::{
     options::{ClientOptions, DatabaseOptions, ReadPreference, SelectionCriteria},
     sdam::{Server, Topology},
 };
+use session::ServerSessionPool;
+pub(crate) use session::{ClientSession, ServerSession};
 
 const DEFAULT_SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -62,6 +66,7 @@ pub struct Client {
 struct ClientInner {
     topology: Topology,
     options: ClientOptions,
+    session_pool: ServerSessionPool,
 }
 
 impl Client {
@@ -82,6 +87,7 @@ impl Client {
 
         let inner = Arc::new(ClientInner {
             topology: Topology::new(options.clone())?,
+            session_pool: ServerSessionPool::default(),
             options,
         });
 
@@ -162,6 +168,59 @@ impl Client {
         }
     }
 
+    /// Check in a server session to the server session pool.
+    /// If the session is expired or dirty, or the topology no longer supports sessions, the session
+    /// will be ended explicitly via the `endSessions` command.
+    pub(crate) async fn check_in_server_session(&self, session: ServerSession) {
+        match self
+            .inner
+            .topology
+            .description()
+            .await
+            .logical_session_timeout()
+        {
+            Some(timeout) => self.inner.session_pool.check_in(session, timeout).await,
+            // If the topology no longer supports sessions, end it.
+            None => self.end_server_session(session).await,
+        }
+    }
+
+    /// Ends a server session via the `endSessions` command if the session is not dirty.
+    /// This method ignores any errors returned as part of the session ending process.
+    async fn end_server_session(&self, session: ServerSession) {
+        async fn try_end(client: &Client, session: ServerSession) -> Result<()> {
+            let server = client
+                .select_server(Some(&ReadPreference::Primary.into()))
+                .await?;
+            let mut connection = server.checkout_connection().await?;
+            let command = Command::new(
+                "endSessions".to_string(),
+                "admin".to_string(),
+                doc! {
+                    "endSessions": [ { "id": session.id } ]
+                },
+            );
+            let _: Result<_> = connection.send_command(command, None).await;
+            Ok(())
+        }
+        if !session.dirty {
+            let _: Result<_> = try_end(self, session).await;
+        }
+    }
+
+    pub(crate) async fn start_session_with_timeout(
+        &self,
+        logical_session_timeout: Duration,
+    ) -> ClientSession {
+        ClientSession::new(
+            self.inner
+                .session_pool
+                .check_out(logical_session_timeout)
+                .await,
+            self.clone(),
+        )
+    }
+
     /// Get the address of the server selected according to the given criteria.
     /// This method is only used in tests.
     #[cfg(test)]
@@ -187,17 +246,17 @@ impl Client {
                 .unwrap_or(DEFAULT_SERVER_SELECTION_TIMEOUT),
         )?;
 
-        let selected_server = self
-            .inner
-            .topology
-            .attempt_to_select_server(criteria)
-            .await?;
-
-        if let Some(server) = selected_server {
-            return Ok(server);
-        }
-
         loop {
+            let selected_server = self
+                .inner
+                .topology
+                .attempt_to_select_server(criteria)
+                .await?;
+
+            if let Some(server) = selected_server {
+                return Ok(server);
+            }
+
             self.inner.topology.request_topology_check();
 
             let time_passed = start_time.to(PreciseTime::now());
@@ -219,16 +278,10 @@ impl Client {
                 }
                 .into());
             }
-
-            let selected_server = self
-                .inner
-                .topology
-                .attempt_to_select_server(criteria)
-                .await?;
-
-            if let Some(server) = selected_server {
-                return Ok(server);
-            }
         }
+    }
+
+    fn is_directly_connected(&self) -> bool {
+        self.inner.options.direct_connection == Some(true)
     }
 }

@@ -3,7 +3,7 @@ mod test;
 
 use bson::Document;
 
-use super::Operation;
+use super::{Operation, OperationContext};
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
@@ -55,7 +55,11 @@ impl Operation for RunCommand {
         ))
     }
 
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         Ok(response.raw_response)
     }
 

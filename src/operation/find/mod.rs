@@ -3,6 +3,7 @@ mod test;
 
 use bson::{doc, Document};
 
+use super::OperationContext;
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     cursor::CursorSpecification,
@@ -96,7 +97,11 @@ impl Operation for Find {
         ))
     }
 
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
         Ok(CursorSpecification {

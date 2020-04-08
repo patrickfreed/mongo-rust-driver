@@ -7,7 +7,7 @@ use crate::{
     coll::{options::EstimatedDocumentCountOptions, Namespace},
     concern::ReadConcern,
     error::ErrorKind,
-    operation::{test, Count, Operation},
+    operation::{test, Count, Operation, OperationContext},
 };
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -82,7 +82,7 @@ async fn handle_success() {
     let response = CommandResponse::with_document(doc! { "n" : n, "ok" : 1 });
 
     let actual_values = count_op
-        .handle_response(response)
+        .handle_response(response, OperationContext::default())
         .expect("supposed to succeed");
 
     assert_eq!(actual_values, n);
@@ -95,7 +95,7 @@ async fn handle_response_no_n() {
 
     let response = CommandResponse::with_document(doc! { "ok" : 1 });
 
-    let result = count_op.handle_response(response);
+    let result = count_op.handle_response(response, OperationContext::default());
     match result.as_ref().map_err(|e| e.as_ref()) {
         Err(ErrorKind::ResponseError { .. }) => {}
         other => panic!("expected response error, but got {:?}", other),

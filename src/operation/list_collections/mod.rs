@@ -7,7 +7,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     cursor::CursorSpecification,
     error::Result,
-    operation::{append_options, CursorBody, Operation},
+    operation::{append_options, CursorBody, Operation, OperationContext},
     options::{ListCollectionsOptions, ReadPreference, SelectionCriteria},
 };
 
@@ -64,7 +64,11 @@ impl Operation for ListCollections {
         Ok(Command::new(Self::NAME.to_string(), self.db.clone(), body))
     }
 
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
         Ok(CursorSpecification {

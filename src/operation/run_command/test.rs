@@ -3,7 +3,7 @@ use bson::doc;
 use super::RunCommand;
 use crate::{
     cmap::{CommandResponse, StreamDescription},
-    operation::Operation,
+    operation::{Operation, OperationContext},
 };
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -37,7 +37,8 @@ async fn no_error_ok_0() {
     });
 
     assert_eq!(
-        op.handle_response(command_response).ok(),
+        op.handle_response(command_response, OperationContext::default())
+            .ok(),
         Some(doc! { "ok": 0 })
     );
 }

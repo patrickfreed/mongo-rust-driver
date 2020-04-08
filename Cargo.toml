@@ -69,6 +69,10 @@ features = ["io-util", "sync"]
 version = "0.13.0"
 features = ["dangerous_configuration"]
 
+[dependencies.uuid]
+version = "0.8"
+features = ["v4"]
+
 [dev-dependencies]
 approx = "0.3.2"
 derive_more = "0.15.0"

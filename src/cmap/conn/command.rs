@@ -4,6 +4,7 @@ use serde::de::DeserializeOwned;
 use super::wire::Message;
 use crate::{
     bson_util,
+    client::ClientSession,
     error::{CommandError, ErrorKind, Result},
     options::StreamAddress,
     selection_criteria::ReadPreference,
@@ -43,6 +44,10 @@ impl Command {
             read_pref: None,
             body,
         }
+    }
+
+    pub(crate) fn set_session(&mut self, session: &ClientSession) {
+        self.body.insert("lsid", session.id());
     }
 }
 

@@ -59,7 +59,7 @@ pub(crate) struct TopologyDescription {
     compatibility_error: Option<String>,
 
     // TODO RUST-149: Session support.
-    logical_session_timeout_minutes: Option<u32>,
+    logical_session_timeout: Option<Duration>,
 
     /// The amount of latency beyond that of the suitable server with the minimum latency that is
     /// acceptable for a read operation.
@@ -138,7 +138,7 @@ impl TopologyDescription {
             max_set_version: None,
             max_election_id: None,
             compatibility_error: None,
-            logical_session_timeout_minutes: None,
+            logical_session_timeout: None,
             local_threshold: options.local_threshold,
             heartbeat_freq: options.heartbeat_freq,
             servers,
@@ -304,6 +304,14 @@ impl TopologyDescription {
     pub(crate) fn sync_hosts(&mut self, hosts: &HashSet<StreamAddress>) {
         self.add_new_servers_from_addresses(hosts.iter());
         self.servers.retain(|host, _| hosts.contains(host));
+    }
+
+    pub(crate) fn topology_type(&self) -> TopologyType {
+        self.topology_type
+    }
+
+    pub(crate) fn logical_session_timeout(&self) -> Option<Duration> {
+        self.logical_session_timeout
     }
 
     /// Update the topology based on the new information about the topology contained by the

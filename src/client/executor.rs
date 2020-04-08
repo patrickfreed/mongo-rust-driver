@@ -1,16 +1,18 @@
-use super::Client;
+use super::{Client, ClientSession};
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use bson::Document;
 use lazy_static::lazy_static;
 use time::PreciseTime;
 
 use crate::{
-    cmap::Connection,
-    error::Result,
+    cmap::{Connection, StreamDescription},
+    error::{ErrorKind, Result},
     event::command::{CommandFailedEvent, CommandStartedEvent, CommandSucceededEvent},
-    operation::Operation,
+    operation::{Operation, OperationContext},
+    options::{SelectionCriteria, WriteConcern},
+    sdam::Server,
 };
 
 lazy_static! {
@@ -58,7 +60,7 @@ impl Client {
     ) -> Result<T::O> {
         // if no connection provided, select one.
         match connection {
-            Some(conn) => self.execute_operation_on_connection(op, conn).await,
+            Some(conn) => todo!("exhaust operations"),
             None => {
                 let server = self.select_server(op.selection_criteria()).await?;
 
@@ -67,7 +69,10 @@ impl Client {
                     Err(err) => {
                         self.inner
                             .topology
-                            .handle_pre_handshake_error(err.clone(), server.address.clone())
+                            .handle_pre_handshake_error(
+                                err.clone(),
+                                server.address.clone(),
+                            )
                             .await;
                         return Err(err);
                     }
@@ -93,11 +98,57 @@ impl Client {
         op: &T,
         connection: &mut Connection,
     ) -> Result<T::O> {
-        let mut cmd = op.build(connection.stream_description()?)?;
+        let stream_description: StreamDescription = connection.stream_description()?.clone();
+
+        let mut cmd = op.build(&stream_description)?;
         self.inner
             .topology
             .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria())
             .await;
+
+        let mut implicit_session: Option<ClientSession> = None;
+
+        let topology_supports_sessions = {
+            // Need to guarantee that we're connected to at least one server that can determine if
+            // sessions are supported or not.
+            if !stream_description.initial_server_type.is_data_bearing()
+                && !self.is_directly_connected()
+            {
+                let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
+                    server_info.server_type().is_data_bearing()
+                }));
+                let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
+            }
+            self.inner.topology.supports_sessions().await
+        };
+
+        let command_supports_sessions =
+            matches!(cmd.name.as_str(), "parallelCollectionScan" | "killCursors");
+
+        let wc_supports_sessions =
+            op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
+
+        if topology_supports_sessions && command_supports_sessions {
+            // We also verify that the server we're sending the command to supports sessions just in
+            // case its monitor hasn't updated the topology description yet.
+            if let Some(timeout) = stream_description.logical_session_timeout {
+                match op.session() {
+                    Some(session) if !wc_supports_sessions => {
+                        return Err(ErrorKind::ArgumentError {
+                            message: "Cannot use ClientSessions with unacknowledged write concern"
+                                .to_string(),
+                        }
+                        .into())
+                    }
+                    Some(session) => cmd.set_session(session),
+                    None => {
+                        let implicit = self.start_session_with_timeout(timeout).await;
+                        cmd.set_session(&implicit);
+                        implicit_session = Some(implicit);
+                    }
+                }
+            }
+        }
 
         let connection_info = connection.info();
         let request_id = crate::cmap::conn::next_request_id();
@@ -136,6 +187,12 @@ impl Client {
         let end_time = PreciseTime::now();
         let duration = start_time.to(end_time).to_std()?;
 
+        // if let Some(implicit_session) = implicit_session {
+        //     if let Some(timeout) = stream_description.logical_session_timeout {
+        //         self.end_session_with_timeout(implicit_session, timeout).await;
+        //     }
+        // }
+
         match response_result {
             Err(error) => {
                 self.emit_command_event(|handler| {
@@ -170,7 +227,7 @@ impl Client {
                     };
                     handler.handle_command_succeeded_event(command_succeeded_event);
                 });
-                op.handle_response(response)
+                op.handle_response(response, OperationContext { implicit_session })
             }
         }
     }

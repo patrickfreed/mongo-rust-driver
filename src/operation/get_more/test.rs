@@ -5,7 +5,7 @@ use bson::{doc, Document};
 use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
-    operation::{GetMore, Operation},
+    operation::{GetMore, Operation, OperationContext},
     options::StreamAddress,
     sdam::{ServerDescription, ServerInfo, ServerType},
     Namespace,
@@ -174,7 +174,7 @@ async fn handle_success() {
     });
 
     let result = get_more
-        .handle_response(response)
+        .handle_response(response, OperationContext::default())
         .expect("handle success case failed");
     assert!(!result.exhausted);
     assert_eq!(result.batch, batch);
@@ -188,7 +188,7 @@ async fn handle_success() {
         "ok": 1
     });
     let result = get_more
-        .handle_response(response)
+        .handle_response(response, OperationContext::default())
         .expect("handle success case failed");
     assert!(result.exhausted);
     assert_eq!(result.batch, batch);

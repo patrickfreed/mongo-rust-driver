@@ -20,8 +20,10 @@ use bson::{self, Bson, Document};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    client::ClientSession,
     cmap::{Command, CommandResponse, StreamDescription},
     error::{BulkWriteError, BulkWriteFailure, ErrorKind, Result, WriteConcernError, WriteFailure},
+    options::WriteConcern,
     selection_criteria::SelectionCriteria,
     Namespace,
 };
@@ -54,10 +56,23 @@ pub(crate) trait Operation {
     fn build(&self, description: &StreamDescription) -> Result<Command>;
 
     /// Interprets the server response to the command.
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O>;
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O>;
 
     /// Criteria to use for selecting the server that this operation will be executed on.
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
+        None
+    }
+
+    /// The write concern to use for for this operation, if any.
+    fn write_concern(&self) -> Option<&WriteConcern> {
+        None
+    }
+
+    fn session(&self) -> Option<&ClientSession> {
         None
     }
 
@@ -87,6 +102,13 @@ pub(crate) fn append_options<T: Serialize>(doc: &mut Document, options: Option<&
         }
         None => Ok(()),
     }
+}
+
+/// Struct containing information about the context in which a given operation was executed.
+#[derive(Debug, Default)]
+pub(crate) struct OperationContext {
+    /// The implicit session that was created as part of executing the operation, if any.
+    pub(crate) implicit_session: Option<ClientSession>,
 }
 
 #[derive(Deserialize)]

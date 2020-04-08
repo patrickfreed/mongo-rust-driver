@@ -12,7 +12,7 @@ use self::server::Server;
 use super::TopologyDescription;
 use crate::{
     cmap::{Command, Connection},
-    error::{Error, ErrorKind, Result},
+    error::{Error, Result},
     options::{ClientOptions, SelectionCriteria, StreamAddress},
     sdam::{
         description::{
@@ -152,13 +152,6 @@ impl Topology {
         criteria: &SelectionCriteria,
     ) -> Result<Option<Arc<Server>>> {
         let topology_state = self.state.read().await;
-
-        if let Some(message) = topology_state.description.compatibility_error() {
-            return Err(ErrorKind::ServerSelectionError {
-                message: message.to_string(),
-            }
-            .into());
-        }
 
         Ok(topology_state
             .description
@@ -315,6 +308,16 @@ impl Topology {
             .read()
             .await
             .update_command_with_read_pref(server_address, command, criteria);
+    }
+
+    pub(crate) async fn supports_sessions(&self) -> bool {
+        let state = self.state.read().await;
+        !matches!(state.description.topology_type(), TopologyType::Single)
+            && state.description.logical_session_timeout().is_some()
+    }
+
+    pub(crate) async fn description(&self) -> TopologyDescription {
+        self.state.read().await.description.clone()
     }
 }
 

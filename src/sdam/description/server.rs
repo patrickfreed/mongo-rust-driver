@@ -36,6 +36,16 @@ impl ServerType {
             _ => false,
         }
     }
+
+    pub(crate) fn is_data_bearing(self) -> bool {
+        matches!(
+            self,
+            ServerType::Standalone
+                | ServerType::RSPrimary
+                | ServerType::RSSecondary
+                | ServerType::Mongos
+        )
+    }
 }
 
 impl Default for ServerType {

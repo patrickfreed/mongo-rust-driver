@@ -6,7 +6,7 @@ use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
     coll::options::ReturnDocument,
-    operation::{FindAndModify, Operation},
+    operation::{FindAndModify, Operation, OperationContext},
     options::{
         FindOneAndDeleteOptions,
         FindOneAndReplaceOptions,
@@ -119,7 +119,7 @@ async fn handle_success_delete() {
         "ok" : 1
     });
 
-    let result = op.handle_response(ok_response);
+    let result = op.handle_response(ok_response, OperationContext::default());
     assert_eq!(
         result.expect("handle failed").expect("result was None"),
         value
@@ -132,7 +132,7 @@ async fn handle_null_value_delete() {
     let op = empty_delete();
 
     let null_value = CommandResponse::with_document(doc! { "ok": 1.0, "value": Bson::Null});
-    let result = op.handle_response(null_value);
+    let result = op.handle_response(null_value, OperationContext::default());
     assert!(result.is_ok());
     assert_eq!(result.expect("handle failed"), None);
 }
@@ -143,7 +143,9 @@ async fn handle_no_value_delete() {
     let op = empty_delete();
 
     let no_value = CommandResponse::with_document(doc! { "ok": 1.0 });
-    assert!(op.handle_response(no_value).is_err());
+    assert!(op
+        .handle_response(no_value, OperationContext::default())
+        .is_err());
 }
 
 // replace tests
@@ -255,7 +257,7 @@ async fn handle_success_replace() {
         "ok" : 1
     });
 
-    let result = op.handle_response(ok_response);
+    let result = op.handle_response(ok_response, OperationContext::default());
     assert_eq!(
         result.expect("handle failed").expect("result was None"),
         value
@@ -268,7 +270,7 @@ async fn handle_null_value_replace() {
     let op = empty_replace();
 
     let null_value = CommandResponse::with_document(doc! { "ok": 1.0, "value": Bson::Null});
-    let result = op.handle_response(null_value);
+    let result = op.handle_response(null_value, OperationContext::default());
     assert!(result.is_ok());
     assert_eq!(result.expect("handle failed"), None);
 }
@@ -279,7 +281,9 @@ async fn handle_no_value_replace() {
     let op = empty_replace();
 
     let no_value = CommandResponse::with_document(doc! { "ok": 1.0 });
-    assert!(op.handle_response(no_value).is_err());
+    assert!(op
+        .handle_response(no_value, OperationContext::default())
+        .is_err());
 }
 
 // update tests
@@ -387,7 +391,7 @@ async fn handle_success_update() {
         "ok" : 1
     });
 
-    let result = op.handle_response(ok_response);
+    let result = op.handle_response(ok_response, OperationContext::default());
     assert_eq!(
         result.expect("handle failed").expect("result was None"),
         value
@@ -400,7 +404,7 @@ async fn handle_null_value_update() {
     let op = empty_update();
 
     let null_value = CommandResponse::with_document(doc! { "ok": 1.0, "value": Bson::Null});
-    let result = op.handle_response(null_value);
+    let result = op.handle_response(null_value, OperationContext::default());
     assert!(result.is_ok());
     assert_eq!(result.expect("handle failed"), None);
 }
@@ -411,5 +415,7 @@ async fn handle_no_value_update() {
     let op = empty_update();
 
     let no_value = CommandResponse::with_document(doc! { "ok": 1.0 });
-    assert!(op.handle_response(no_value).is_err());
+    assert!(op
+        .handle_response(no_value, OperationContext::default())
+        .is_err());
 }

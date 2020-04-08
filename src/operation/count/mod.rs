@@ -8,7 +8,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     coll::{options::EstimatedDocumentCountOptions, Namespace},
     error::Result,
-    operation::{append_options, Operation},
+    operation::{append_options, Operation, OperationContext},
     selection_criteria::SelectionCriteria,
 };
 
@@ -52,7 +52,11 @@ impl Operation for Count {
         ))
     }
 
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         response.body::<ResponseBody>().map(|body| body.n)
     }
 

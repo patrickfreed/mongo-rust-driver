@@ -249,7 +249,7 @@ async fn run_test(test_file: TestFile) {
         max_set_version: None,
         max_election_id: None,
         compatibility_error: None,
-        logical_session_timeout_minutes: None,
+        logical_session_timeout: None,
         local_threshold: None,
         heartbeat_freq: test_file.heartbeat_frequency_ms.map(Duration::from_millis),
         servers: servers

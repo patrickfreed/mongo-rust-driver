@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
-    operation::Operation,
+    operation::{Operation, OperationContext},
     options::{SelectionCriteria, StreamAddress},
     results::GetMoreResult,
     Namespace,
@@ -82,7 +82,11 @@ impl Operation for GetMore {
         ))
     }
 
-    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
+    fn handle_response(
+        &self,
+        response: CommandResponse,
+        context: OperationContext,
+    ) -> Result<Self::O> {
         let body: GetMoreResponseBody = response.body()?;
         Ok(GetMoreResult {
             batch: body.cursor.next_batch,

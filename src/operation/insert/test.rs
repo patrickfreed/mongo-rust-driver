@@ -4,7 +4,7 @@ use crate::{
     cmap::{CommandResponse, StreamDescription},
     concern::WriteConcern,
     error::{BulkWriteError, ErrorKind, WriteConcernError},
-    operation::{Insert, Operation},
+    operation::{Insert, Operation, OperationContext},
     options::InsertManyOptions,
     Namespace,
 };
@@ -142,7 +142,9 @@ async fn handle_success() {
     let fixtures = fixtures();
 
     let ok_response = CommandResponse::with_document(doc! { "ok": 1.0, "n": 3 });
-    let ok_result = fixtures.op.handle_response(ok_response);
+    let ok_result = fixtures
+        .op
+        .handle_response(ok_response, OperationContext::default());
     assert!(ok_result.is_ok());
 
     let inserted_ids = ok_result.unwrap().inserted_ids;
@@ -159,7 +161,10 @@ async fn handle_invalid_response() {
     let fixtures = fixtures();
 
     let invalid_response = CommandResponse::with_document(doc! { "ok": 1.0, "asdfadsf": 123123 });
-    assert!(fixtures.op.handle_response(invalid_response).is_err());
+    assert!(fixtures
+        .op
+        .handle_response(invalid_response, OperationContext::default())
+        .is_err());
 }
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -184,7 +189,9 @@ async fn handle_write_failure() {
         }
     });
 
-    let write_error_result = fixtures.op.handle_response(write_error_response);
+    let write_error_result = fixtures
+        .op
+        .handle_response(write_error_response, OperationContext::default());
     assert!(write_error_result.is_err());
 
     match *write_error_result.unwrap_err().kind {

@@ -4,7 +4,7 @@ use crate::{
     cmap::{CommandResponse, StreamDescription},
     concern::{Acknowledgment, WriteConcern},
     error::{ErrorKind, WriteFailure},
-    operation::{DropDatabase, Operation},
+    operation::{DropDatabase, Operation, OperationContext},
     options::DropDatabaseOptions,
 };
 
@@ -57,9 +57,13 @@ async fn handle_success() {
     let op = DropDatabase::empty();
 
     let ok_response = CommandResponse::with_document(doc! { "ok": 1.0 });
-    assert!(op.handle_response(ok_response).is_ok());
+    assert!(op
+        .handle_response(ok_response, OperationContext::default())
+        .is_ok());
     let ok_extra = CommandResponse::with_document(doc! { "ok": 1.0, "hello": "world" });
-    assert!(op.handle_response(ok_extra).is_ok());
+    assert!(op
+        .handle_response(ok_extra, OperationContext::default())
+        .is_ok());
 }
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -76,7 +80,7 @@ async fn handle_write_concern_error() {
         "ok": 1
     });
 
-    let result = op.handle_response(response);
+    let result = op.handle_response(response, OperationContext::default());
     assert!(result.is_err());
 
     match *result.unwrap_err().kind {
