@@ -16,7 +16,8 @@ pub(crate) struct StreamDescription {
     /// The supported authentication mechanisms that the server understands.
     pub(crate) sasl_supported_mechs: Option<Vec<String>>,
 
-    ///
+    /// How long sessions started on this server will stay alive without
+    /// without executing an operation before the server kills them.
     pub(crate) logical_session_timeout: Option<Duration>,
 }
 

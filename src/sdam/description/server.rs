@@ -297,6 +297,17 @@ impl ServerDescription {
         }
     }
 
+    pub(crate) fn logical_session_timeout(&self) -> Result<Option<Duration>> {
+        match self.reply {
+            Ok(None) => Ok(None),
+            Ok(Some(ref reply)) => Ok(reply
+                .command_response
+                .logical_session_timeout_minutes
+                .map(|timeout| Duration::from_secs(timeout as u64 * 60))),
+            Err(ref e) => Err(e.clone()),
+        }
+    }
+
     pub(crate) fn matches_tag_set(&self, tag_set: &TagSet) -> bool {
         let reply = match self.reply.as_ref() {
             Ok(Some(ref reply)) => reply,

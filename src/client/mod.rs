@@ -20,7 +20,7 @@ use crate::{
     event::command::CommandEventHandler,
     operation::ListDatabases,
     options::{ClientOptions, DatabaseOptions, ReadPreference, SelectionCriteria},
-    sdam::{Server, Topology},
+    sdam::{Server, SessionSupportStatus, Topology},
 };
 use session::ServerSessionPool;
 pub(crate) use session::{ClientSession, ServerSession};
@@ -170,18 +170,17 @@ impl Client {
 
     /// Check in a server session to the server session pool.
     /// If the session is expired or dirty, or the topology no longer supports sessions, the session
-    /// will be ended explicitly via the `endSessions` command.
+    /// will be discarded.
     pub(crate) async fn check_in_server_session(&self, session: ServerSession) {
-        match self
-            .inner
-            .topology
-            .description()
-            .await
-            .logical_session_timeout()
+        let session_support_status = self.inner.topology.session_support_status().await;
+        if let SessionSupportStatus::Supported {
+            logical_session_timeout,
+        } = session_support_status
         {
-            Some(timeout) => self.inner.session_pool.check_in(session, timeout).await,
-            // If the topology no longer supports sessions, end it.
-            None => self.end_server_session(session).await,
+            self.inner
+                .session_pool
+                .check_in(session, logical_session_timeout)
+                .await;
         }
     }
 
@@ -279,9 +278,5 @@ impl Client {
                 .into());
             }
         }
-    }
-
-    fn is_directly_connected(&self) -> bool {
-        self.inner.options.direct_connection == Some(true)
     }
 }

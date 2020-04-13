@@ -9,7 +9,7 @@ use std::{
 use tokio::sync::RwLock;
 
 use self::server::Server;
-use super::TopologyDescription;
+use super::{SessionSupportStatus, TopologyDescription};
 use crate::{
     cmap::{Command, Connection},
     error::{Error, Result},
@@ -310,14 +310,9 @@ impl Topology {
             .update_command_with_read_pref(server_address, command, criteria);
     }
 
-    pub(crate) async fn supports_sessions(&self) -> bool {
-        let state = self.state.read().await;
-        !matches!(state.description.topology_type(), TopologyType::Single)
-            && state.description.logical_session_timeout().is_some()
-    }
-
-    pub(crate) async fn description(&self) -> TopologyDescription {
-        self.state.read().await.description.clone()
+    /// Gets the latest information on whether sessions are supported or not.
+    pub(crate) async fn session_support_status(&self) -> SessionSupportStatus {
+        self.state.read().await.description.session_support_status()
     }
 }
 

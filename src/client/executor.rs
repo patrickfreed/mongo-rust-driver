@@ -12,7 +12,7 @@ use crate::{
     event::command::{CommandFailedEvent, CommandStartedEvent, CommandSucceededEvent},
     operation::{Operation, OperationContext},
     options::{SelectionCriteria, WriteConcern},
-    sdam::Server,
+    sdam::{Server, SessionSupportStatus},
 };
 
 lazy_static! {
@@ -69,10 +69,7 @@ impl Client {
                     Err(err) => {
                         self.inner
                             .topology
-                            .handle_pre_handshake_error(
-                                err.clone(),
-                                server.address.clone(),
-                            )
+                            .handle_pre_handshake_error(err.clone(), server.address.clone())
                             .await;
                         return Err(err);
                     }
@@ -108,18 +105,21 @@ impl Client {
 
         let mut implicit_session: Option<ClientSession> = None;
 
-        let topology_supports_sessions = {
+        let topology_session_support_status = {
+            let initial_status = self.inner.topology.session_support_status().await;
+
             // Need to guarantee that we're connected to at least one server that can determine if
             // sessions are supported or not.
-            if !stream_description.initial_server_type.is_data_bearing()
-                && !self.is_directly_connected()
-            {
-                let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
-                    server_info.server_type().is_data_bearing()
-                }));
-                let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
+            match initial_status {
+                SessionSupportStatus::Undetermined => {
+                    let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
+                        server_info.server_type().is_data_bearing()
+                    }));
+                    let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
+                    self.inner.topology.session_support_status().await
+                }
+                _ => initial_status,
             }
-            self.inner.topology.supports_sessions().await
         };
 
         let command_supports_sessions =
@@ -128,23 +128,31 @@ impl Client {
         let wc_supports_sessions =
             op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
 
-        if topology_supports_sessions && command_supports_sessions {
-            // We also verify that the server we're sending the command to supports sessions just in
-            // case its monitor hasn't updated the topology description yet.
-            if let Some(timeout) = stream_description.logical_session_timeout {
-                match op.session() {
-                    Some(session) if !wc_supports_sessions => {
-                        return Err(ErrorKind::ArgumentError {
-                            message: "Cannot use ClientSessions with unacknowledged write concern"
-                                .to_string(),
+        if let SessionSupportStatus::Supported {
+            logical_session_timeout,
+        } = topology_session_support_status
+        {
+            if command_supports_sessions {
+                // We also verify that the server we're sending the command to supports sessions
+                // just in case its monitor hasn't updated the topology description
+                // yet.
+                if let Some(server_timeout) = stream_description.logical_session_timeout {
+                    match op.session() {
+                        Some(session) if !wc_supports_sessions => {
+                            return Err(ErrorKind::ArgumentError {
+                                message: "Cannot use ClientSessions with unacknowledged write \
+                                          concern"
+                                    .to_string(),
+                            }
+                            .into())
                         }
-                        .into())
-                    }
-                    Some(session) => cmd.set_session(session),
-                    None => {
-                        let implicit = self.start_session_with_timeout(timeout).await;
-                        cmd.set_session(&implicit);
-                        implicit_session = Some(implicit);
+                        Some(session) => cmd.set_session(session),
+                        None => {
+                            let timeout = std::cmp::min(server_timeout, logical_session_timeout);
+                            let implicit = self.start_session_with_timeout(timeout).await;
+                            cmd.set_session(&implicit);
+                            implicit_session = Some(implicit);
+                        }
                     }
                 }
             }
@@ -186,12 +194,6 @@ impl Client {
 
         let end_time = PreciseTime::now();
         let duration = start_time.to(end_time).to_std()?;
-
-        // if let Some(implicit_session) = implicit_session {
-        //     if let Some(timeout) = stream_description.logical_session_timeout {
-        //         self.end_session_with_timeout(implicit_session, timeout).await;
-        //     }
-        // }
 
         match response_result {
             Err(error) => {
