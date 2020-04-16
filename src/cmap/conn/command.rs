@@ -1,10 +1,12 @@
-use bson::{Bson, Document};
+use std::ops::Deref;
+
+use bson::{Bson, Document, doc};
 use serde::de::DeserializeOwned;
 
 use super::wire::Message;
 use crate::{
     bson_util,
-    client::ClientSession,
+    client::{ClusterTime, ClientSession},
     error::{CommandError, ErrorKind, Result},
     options::StreamAddress,
     selection_criteria::ReadPreference,
@@ -47,7 +49,15 @@ impl Command {
     }
 
     pub(crate) fn set_session(&mut self, session: &ClientSession) {
-        self.body.insert("lsid", session.id());
+        self.body.insert("lsid", session.id().deref());
+    }
+
+    pub(crate) fn set_cluster_time(&mut self, cluster_time: &ClusterTime) {
+        if let Ok(doc) = bson::to_bson(cluster_time) {
+            self.body.insert("$clusterTime", doc! {
+                "clusterTime": doc,
+            });
+        }
     }
 }
 
@@ -117,6 +127,13 @@ impl CommandResponse {
             }
             .into()),
         }
+    }
+
+    /// Get's the cluster time from the response, if any.
+    pub(crate) fn cluster_time(&self) -> Option<ClusterTime> {
+        self.raw_response.get("$clusterTime").and_then(|subdoc| {
+            bson::from_bson(subdoc.clone()).ok()
+        })
     }
 
     /// The address of the server that sent this response.

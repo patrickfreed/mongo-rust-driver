@@ -72,14 +72,8 @@ pub(crate) trait Operation {
         None
     }
 
-    fn session(&self) -> Option<&ClientSession> {
+    fn session(&mut self) -> Option<&mut ClientSession> {
         None
-    }
-
-    /// Whether or not the operation has special handling for command errors, or whether they should
-    /// just be propogated to the user immediately.
-    fn handles_command_errors(&self) -> bool {
-        false
     }
 }
 

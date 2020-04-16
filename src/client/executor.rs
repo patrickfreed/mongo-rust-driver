@@ -37,7 +37,7 @@ impl Client {
     #[allow(dead_code)]
     pub(crate) async fn execute_exhaust_operation<T: Operation>(
         &self,
-        op: &T,
+        op: T,
     ) -> Result<(T::O, Connection)> {
         let server = self.select_server(op.selection_criteria()).await?;
         let mut conn = server.checkout_connection().await?;
@@ -46,45 +46,31 @@ impl Client {
             .map(|r| (r, conn))
     }
 
-    pub(crate) async fn execute_operation_owned<T: Operation>(self, op: T) -> Result<T::O> {
-        self.execute_operation(&op, None).await
-    }
-
     /// Execute the given operation, optionally specifying a connection used to do so.
     /// If no connection is provided, server selection will performed using the criteria specified
     /// on the operation, if any.
-    pub(crate) async fn execute_operation<T: Operation>(
-        &self,
-        op: &T,
-        connection: Option<&mut Connection>,
-    ) -> Result<T::O> {
-        // if no connection provided, select one.
-        match connection {
-            Some(conn) => todo!("exhaust operations"),
-            None => {
-                let server = self.select_server(op.selection_criteria()).await?;
+    pub(crate) async fn execute_operation<T: Operation>(&self, op: T) -> Result<T::O> {
+        let server = self.select_server(op.selection_criteria()).await?;
 
-                let mut conn = match server.checkout_connection().await {
-                    Ok(conn) => conn,
-                    Err(err) => {
-                        self.inner
-                            .topology
-                            .handle_pre_handshake_error(err.clone(), server.address.clone())
-                            .await;
-                        return Err(err);
-                    }
-                };
+        let mut conn = match server.checkout_connection().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                self.inner
+                    .topology
+                    .handle_pre_handshake_error(err.clone(), server.address.clone())
+                    .await;
+                return Err(err);
+            }
+        };
 
-                match self.execute_operation_on_connection(op, &mut conn).await {
-                    Ok(result) => Ok(result),
-                    Err(err) => {
-                        self.inner
-                            .topology
-                            .handle_post_handshake_error(err.clone(), conn, server)
-                            .await;
-                        Err(err)
-                    }
-                }
+        match self.execute_operation_on_connection(op, &mut conn).await {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                self.inner
+                    .topology
+                    .handle_post_handshake_error(err.clone(), conn, server)
+                    .await;
+                Err(err)
             }
         }
     }
@@ -92,7 +78,7 @@ impl Client {
     /// Executes an operation on a given connection.
     async fn execute_operation_on_connection<T: Operation>(
         &self,
-        op: &T,
+        mut op: T,
         connection: &mut Connection,
     ) -> Result<T::O> {
         let stream_description: StreamDescription = connection.stream_description()?.clone();
@@ -103,8 +89,9 @@ impl Client {
             .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria())
             .await;
 
-        let mut implicit_session: Option<ClientSession> = None;
-
+        let mut session: Option<ClientSession> = None;
+        let mut started_implicit = false;
+        
         let topology_session_support_status = {
             let initial_status = self.inner.topology.session_support_status().await;
 
@@ -146,16 +133,27 @@ impl Client {
                             }
                             .into())
                         }
-                        Some(session) => cmd.set_session(session),
+                        Some(explicit_session) => {
+                            session = Some(explicit_session.clone());
+                        },
                         None => {
                             let timeout = std::cmp::min(server_timeout, logical_session_timeout);
-                            let implicit = self.start_session_with_timeout(timeout).await;
-                            cmd.set_session(&implicit);
-                            implicit_session = Some(implicit);
+                            session = Some(self.start_session_with_timeout(timeout).await);
+                            started_implicit = true;
                         }
                     }
                 }
             }
+        }
+        if let Some(ref session) = session {
+            cmd.set_session(session);
+        }
+        
+        let session_cluster_time = session.as_ref().and_then(|session| session.cluster_time());
+        let client_cluster_time = self.inner.cluster_time.read().await;
+        let max_cluster_time = std::cmp::max(session_cluster_time, client_cluster_time.as_ref());
+        if let Some(cluster_time) = max_cluster_time {
+            cmd.set_cluster_time(cluster_time);
         }
 
         let connection_info = connection.info();
@@ -186,9 +184,7 @@ impl Client {
             .send_command(cmd.clone(), request_id)
             .await
             .and_then(|response| {
-                if !op.handles_command_errors() {
-                    response.validate()?;
-                }
+                response.validate()?;
                 Ok(response)
             });
 
@@ -229,7 +225,15 @@ impl Client {
                     };
                     handler.handle_command_succeeded_event(command_succeeded_event);
                 });
-                op.handle_response(response, OperationContext { implicit_session })
+                if let Some(cluster_time) = response.cluster_time() {
+                    self.update_cluster_time(&cluster_time).await;
+                    if let Some(ref mut session) = session {
+                        session.advance_cluster_time(cluster_time)
+                    }
+                }
+                op.handle_response(response, OperationContext {
+                    implicit_session: if started_implicit { session } else { None },
+                })
             }
         }
     }

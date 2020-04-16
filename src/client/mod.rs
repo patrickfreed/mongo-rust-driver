@@ -23,7 +23,8 @@ use crate::{
     sdam::{Server, SessionSupportStatus, Topology},
 };
 use session::ServerSessionPool;
-pub(crate) use session::{ClientSession, ServerSession};
+pub(crate) use session::{ClientSession, ServerSession, ClusterTime};
+use tokio::sync::RwLock;
 
 const DEFAULT_SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -67,6 +68,7 @@ struct ClientInner {
     topology: Topology,
     options: ClientOptions,
     session_pool: ServerSessionPool,
+    cluster_time: RwLock<Option<ClusterTime>>,
 }
 
 impl Client {
@@ -88,6 +90,7 @@ impl Client {
         let inner = Arc::new(ClientInner {
             topology: Topology::new(options.clone())?,
             session_pool: ServerSessionPool::default(),
+            cluster_time: RwLock::new(None),
             options,
         });
 
@@ -141,7 +144,7 @@ impl Client {
         filter: impl Into<Option<Document>>,
     ) -> Result<Vec<Document>> {
         let op = ListDatabases::new(filter.into(), false);
-        self.execute_operation(&op, None).await
+        self.execute_operation(op).await
     }
 
     /// Gets the names of the databases present in the cluster the Client is connected to.
@@ -150,7 +153,7 @@ impl Client {
         filter: impl Into<Option<Document>>,
     ) -> Result<Vec<String>> {
         let op = ListDatabases::new(filter.into(), true);
-        match self.execute_operation(&op, None).await {
+        match self.execute_operation(op).await {
             Ok(databases) => databases
                 .into_iter()
                 .map(|doc| {
@@ -220,6 +223,18 @@ impl Client {
         )
     }
 
+    /// Sets the client's cluster time to the provided one if it is higher than the client's current highest
+    /// seen value.
+    async fn update_cluster_time(&self, cluster_time: &ClusterTime) {
+        let mut client_time_lock = self.inner.cluster_time.write().await;
+        if let Some(ref client_time) = *client_time_lock {
+            if client_time > cluster_time {
+                return;
+            }
+        }
+        *client_time_lock = Some(cluster_time.clone());
+    }
+    
     /// Get the address of the server selected according to the given criteria.
     /// This method is only used in tests.
     #[cfg(test)]

@@ -1,9 +1,12 @@
 use std::{
     collections::VecDeque,
-    time::{Duration, Instant},
+    ops::Deref,
+    sync::Arc,
+    time::{Duration, Instant}, cell::{Ref, RefCell},
 };
 
-use bson::{doc, spec::BinarySubtype, Bson, Document};
+use bson::{doc, spec::BinarySubtype, Bson, Document, TimeStamp};
+use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -11,34 +14,62 @@ use crate::{Client, RUNTIME};
 
 /// Session to be used with client operations. This acts as a handle to a server session.
 /// This keeps the details of how server sessions are pooled opaque to users.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ClientSession {
-    pub(super) server_session: ServerSession,
+    state: RefCell<Arc<ClientSessionState>>,
     client: Client,
 }
 
 impl ClientSession {
     pub(crate) fn new(server_session: ServerSession, client: Client) -> Self {
         Self {
-            server_session,
             client,
+            state: RefCell::new(Arc::new(ClientSessionState::new(server_session))),
         }
     }
 
     /// The id of this session.
-    pub(crate) fn id(&self) -> &Document {
-        self.server_session.assert_is_non_null();
-        &self.server_session.id
+    pub(crate) fn id(&self) -> impl Deref<Target = Document> + '_ {
+        // state.server_session.assert_is_non_null();
+        Ref::map(self.state.borrow(), |state| &state.server_session.id)
+    }
+
+    pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {
+        todo!()
+        // self.state.cluster_time.as_ref()
+    }
+
+    pub(crate) fn advance_cluster_time(&mut self, to: ClusterTime) {
+        todo!()
+        // self.state.cluster_time = Some(to);
+    }
+
+    fn take(&mut self) -> ClientSessionState {
+        todo!()
+        // self.state.replace(ClientSessionState::new(ServerSession::null()))
     }
 }
 
-impl Drop for ClientSession {
-    fn drop(&mut self) {
-        let server_session = std::mem::replace(&mut self.server_session, ServerSession::null());
-        let client = self.client.clone();
-        RUNTIME.execute(async move {
-            client.check_in_server_session(server_session).await;
-        })
+// impl Drop for ClientSession {
+//     fn drop(&mut self) {
+//         let client = self.client.clone();
+//         let state = self.take();
+//         RUNTIME.execute(async move {
+//             client.check_in_server_session(state.server_session).await;
+//         })
+//     }
+// }
+
+/// Struct encapsulating shared state among `ClientSession` instances.
+#[derive(Debug)]
+struct ClientSessionState {
+    cluster_time: Option<ClusterTime>,
+    server_session: ServerSession,
+}
+
+impl ClientSessionState {
+    fn new(server_session: ServerSession) -> Self {
+        Self { cluster_time: None, server_session }
     }
 }
 
@@ -124,5 +155,33 @@ impl ServerSessionPool {
         if !session.dirty && !session.is_about_to_expire(logical_session_timeout) {
             pool.push_front(session);
         }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub(crate) struct ClusterTime {
+    cluster_time: TimeStamp,
+    signature: Document,
+}
+
+impl std::cmp::PartialEq for ClusterTime {
+    fn eq(&self, other: &ClusterTime) -> bool {
+        self.cluster_time == other.cluster_time
+    }
+}
+
+impl std::cmp::Eq for ClusterTime {}
+
+impl std::cmp::Ord for ClusterTime {
+    fn cmp(&self, other: &ClusterTime) -> std::cmp::Ordering {
+        let lhs = self.cluster_time.t as u64 + self.cluster_time.i as u64;
+        let rhs = other.cluster_time.t as u64 + other.cluster_time.i as u64;
+        lhs.cmp(&rhs)
+    }
+}
+
+impl std::cmp::PartialOrd for ClusterTime {
+    fn partial_cmp(&self, other: &ClusterTime) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

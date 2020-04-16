@@ -147,7 +147,7 @@ impl Database {
         resolve_options!(self, options, [write_concern]);
 
         let drop_database = DropDatabase::new(self.name().to_string(), options);
-        self.client().execute_operation(&drop_database, None).await
+        self.client().execute_operation(drop_database).await
     }
 
     /// Gets information about each of the collections in the database. The cursor will yield a
@@ -164,7 +164,7 @@ impl Database {
             options.into(),
         );
         self.client()
-            .execute_operation(&list_collections, None)
+            .execute_operation(list_collections)
             .await
             .map(|spec| Cursor::new(self.client().clone(), spec))
     }
@@ -178,7 +178,7 @@ impl Database {
             ListCollections::new(self.name().to_string(), filter.into(), true, None);
         let cursor = self
             .client()
-            .execute_operation(&list_collections, None)
+            .execute_operation(list_collections)
             .await
             .map(|spec| Cursor::new(self.client().clone(), spec))?;
 
@@ -216,7 +216,7 @@ impl Database {
             },
             options,
         );
-        self.client().execute_operation(&create, None).await
+        self.client().execute_operation(create).await
     }
 
     /// Runs a database-level command.
@@ -230,7 +230,7 @@ impl Database {
         selection_criteria: impl Into<Option<SelectionCriteria>>,
     ) -> Result<Document> {
         let operation = RunCommand::new(self.name().into(), command, selection_criteria.into());
-        self.client().execute_operation(&operation, None).await
+        self.client().execute_operation(operation).await
     }
 
     /// Runs an aggregation operation.
@@ -252,7 +252,7 @@ impl Database {
         let aggregate = Aggregate::new(self.name().to_string(), pipeline, options);
         let client = self.client();
         client
-            .execute_operation(&aggregate, None)
+            .execute_operation(aggregate)
             .await
             .map(|spec| Cursor::new(client.clone(), spec))
     }

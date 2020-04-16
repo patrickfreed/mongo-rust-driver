@@ -12,7 +12,7 @@ use crate::{
     operation::{append_options, Operation, OperationContext, WriteResponseBody},
     options::InsertManyOptions,
     results::InsertManyResult,
-    Namespace,
+    Namespace, client::ClientSession,
 };
 
 #[derive(Debug)]
@@ -20,6 +20,7 @@ pub(crate) struct Insert {
     ns: Namespace,
     documents: Vec<Document>,
     options: Option<InsertManyOptions>,
+    session: Option<ClientSession>,
 }
 
 impl Insert {
@@ -38,6 +39,7 @@ impl Insert {
                     d
                 })
                 .collect(),
+            session: None,
         }
     }
 }
@@ -67,6 +69,8 @@ impl Operation for Insert {
         ))
     }
 
+    
+    
     fn handle_response(
         &self,
         response: CommandResponse,
@@ -87,5 +91,9 @@ impl Operation for Insert {
             );
         }
         Ok(InsertManyResult { inserted_ids: map })
+    }
+
+    fn session(&mut self) -> Option<&mut ClientSession> {
+        self.session.as_mut()
     }
 }
