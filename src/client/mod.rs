@@ -23,7 +23,8 @@ use crate::{
     sdam::{Server, SessionSupportStatus, Topology},
 };
 use session::ServerSessionPool;
-pub(crate) use session::{ClientSession, ServerSession, ClusterTime};
+pub use session::{ClientSession};
+pub(crate) use session::{ServerSession, ClusterTime};
 use tokio::sync::RwLock;
 
 const DEFAULT_SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(30);

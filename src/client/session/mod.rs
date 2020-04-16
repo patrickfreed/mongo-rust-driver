@@ -15,7 +15,7 @@ use crate::{Client, RUNTIME};
 /// Session to be used with client operations. This acts as a handle to a server session.
 /// This keeps the details of how server sessions are pooled opaque to users.
 #[derive(Debug, Clone)]
-pub(crate) struct ClientSession {
+pub struct ClientSession {
     state: RefCell<Arc<ClientSessionState>>,
     client: Client,
 }
