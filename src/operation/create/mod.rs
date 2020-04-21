@@ -7,7 +7,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::Result,
     operation::{append_options, Operation, OperationContext, WriteConcernOnlyBody},
-    options::CreateCollectionOptions,
+    options::{WriteConcern, CreateCollectionOptions},
     Namespace,
 };
 
@@ -57,5 +57,9 @@ impl Operation for Create {
         context: OperationContext,
     ) -> Result<Self::O> {
         response.body::<WriteConcernOnlyBody>()?.validate()
+    }
+
+    fn write_concern(&self) -> Option<&WriteConcern> {
+        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
     }
 }

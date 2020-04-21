@@ -9,7 +9,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::{convert_bulk_errors, Result},
     operation::{Operation, OperationContext, WriteResponseBody},
-    options::{UpdateModifications, UpdateOptions},
+    options::{UpdateModifications, UpdateOptions, WriteConcern},
     results::UpdateResult,
     Namespace,
 };
@@ -132,6 +132,10 @@ impl Operation for Update {
             modified_count,
             upserted_id,
         })
+    }
+
+    fn write_concern(&self) -> Option<&WriteConcern> {
+        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
     }
 }
 

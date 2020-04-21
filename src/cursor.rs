@@ -17,7 +17,7 @@ use crate::{
     results::GetMoreResult,
     Client,
     Namespace,
-    RUNTIME,
+    RUNTIME, client::ClientSession,
 };
 
 #[derive(Debug)]
@@ -33,9 +33,9 @@ pub(crate) struct CursorSpecification {
 #[derive(Debug)]
 pub struct Cursor {
     client: Client,
-    get_more: GetMore,
-    exhausted: bool,
-    state: State,
+    spec: CursorSpecification,
+    state: ExecutionState,
+    status: CursorStatus,
 }
 
 type GetMoreFuture = BoxFuture<'static, Result<GetMoreResult>>;
@@ -45,40 +45,67 @@ type GetMoreFuture = BoxFuture<'static, Result<GetMoreResult>>;
 /// batch.
 #[derive(Derivative)]
 #[derivative(Debug)]
-enum State {
+enum ExecutionState {
     Executing(#[derivative(Debug = "ignore")] GetMoreFuture),
     Buffer(VecDeque<Document>),
+    Done,
+}
+
+#[derive(Debug)]
+enum CursorStatus {
+    Alive { session: ClientSession },
     Exhausted,
 }
 
-impl Cursor {
-    pub(crate) fn new(client: Client, spec: CursorSpecification) -> Self {
-        let get_more = GetMore::new(
-            spec.ns,
-            spec.id,
-            spec.address,
-            spec.batch_size,
-            spec.max_time,
-        );
+pub(crate) struct SessionCursor {}
 
+impl SessionCursor {
+    fn new(client: Client, spec: CursorSpecification) -> Self {
+        todo!()
+    }
+}
+
+impl Cursor {
+    pub(crate) fn new(client: Client, spec: CursorSpecification, session: ClientSession) -> Self {
         Self {
             client,
-            get_more,
-            exhausted: spec.id == 0,
-            state: State::Buffer(spec.buffer),
+            spec,
+            status: if spec.id == 0 { CursorStatus::Exhausted } else { CursorStatus::Alive { session } },
+            state: ExecutionState::Buffer(spec.buffer),
         }
+    }
+
+    fn get_more(&self) -> GetMore<'static> {
+        match self.status {
+            CursorStatus::Alive { session } => {
+                GetMore::new(
+                    self.spec.ns,
+                    self.spec.id,
+                    self.spec.address,
+                    self.spec.batch_size,
+                    self.spec.max_time,
+                    Some(&mut session),
+                );
+            },
+            _ => panic!("wooo")
+        }
+        
+    }
+
+    fn is_exhausted(&self) -> bool {
+        matches!(self.status, CursorStatus::Exhausted)
     }
 }
 
 impl Drop for Cursor {
     fn drop(&mut self) {
-        if self.exhausted {
+        if self.is_exhausted() {
             return;
         }
 
-        let namespace = self.get_more.namespace().clone();
+        let namespace = self.spec.ns.clone();
         let client = self.client.clone();
-        let cursor_id = self.get_more.cursor_id();
+        let cursor_id = self.spec.id.clone();
 
         RUNTIME.execute(async move {
             let _: Result<_> = client
@@ -103,7 +130,7 @@ impl Stream for Cursor {
             match self.state {
                 // If the current state is Executing, then we check the progress of the getMore
                 // operation.
-                State::Executing(ref mut future) => {
+                ExecutionState::Executing(ref mut future) => {
                     match Pin::new(future).poll(cx) {
                         // If the getMore is finished and successful, then we pop off the first
                         // document from the batch, set the poll state to
@@ -114,8 +141,10 @@ impl Stream for Cursor {
                                 get_more_result.batch.into_iter().collect();
                             let next_doc = buffer.pop_front();
 
-                            self.state = State::Buffer(buffer);
-                            self.exhausted = get_more_result.exhausted;
+                            self.state = ExecutionState::Buffer(buffer);
+                            if get_more_result.exhausted {
+                                self.status = CursorStatus::Exhausted;
+                            }
 
                             match next_doc {
                                 Some(doc) => return Poll::Ready(Some(Ok(doc))),
@@ -131,7 +160,7 @@ impl Stream for Cursor {
                     }
                 }
 
-                State::Buffer(ref mut buffer) => {
+                ExecutionState::Buffer(ref mut buffer) => {
                     // If there is a document ready, return it.
                     if let Some(doc) = buffer.pop_front() {
                         return Poll::Ready(Some(Ok(doc)));
@@ -139,26 +168,26 @@ impl Stream for Cursor {
 
                     // If no documents are left and the batch and the cursor is exhausted, set the
                     // state to None.
-                    if self.exhausted {
-                        self.state = State::Exhausted;
+                    if self.is_exhausted() {
+                        self.state = ExecutionState::Done;
                         return Poll::Ready(None);
                     // If the batch is empty and the cursor is not exhausted, start a new operation
                     // and set the state to Executing.
                     } else {
-                        let future = Box::pin(
-                            self.client
-                                .clone()
-                                .execute_operation_owned(self.get_more.clone()),
-                        );
+                        let client = self.client.clone();
+                        let get_more = self.get_more();
+                        let future = Box::pin(async move {
+                            client.execute_operation(get_more).await
+                        });
 
-                        self.state = State::Executing(future as GetMoreFuture);
+                        self.state = ExecutionState::Executing(future as GetMoreFuture);
                         continue;
                     }
                 }
 
                 // If the state is None, then the cursor has already exhausted all its results, so
                 // do nothing.
-                State::Exhausted => return Poll::Ready(None),
+                ExecutionState::Done => return Poll::Ready(None),
             }
         }
     }

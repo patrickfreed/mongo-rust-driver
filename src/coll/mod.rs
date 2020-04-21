@@ -21,7 +21,8 @@ use crate::{
         Find,
         FindAndModify,
         Insert,
-        Update, Operation, LifetimeOperation,
+        Update,
+        Operation,
     },
     results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult},
     selection_criteria::SelectionCriteria,
@@ -555,40 +556,6 @@ impl Collection {
         let update = Update::new(self.namespace(), query, update.into(), false, options);
         self.client().execute_operation(update).await
     }
-
-    pub async fn method_with_session<'a>(&self, session: &'a mut ClientSession) -> Result<CursorWithSession<'a>> {
-        let op = SessionOp{};
-        let fut = self.client().execute_lifetime_operation(op, Some(session));
-        is_send(&fut);
-        fut.await.map(|op_result| {
-            CursorWithSession { session: op_result.context.session.unwrap() }
-        })
-    }
-}
-
-fn is_send<T: Send>(t: &T) {}
-
-pub(crate) struct SessionOp {
-}
-
-impl LifetimeOperation for SessionOp {
-    type O = Spec;
-    const NAME: &'static str = "debug";
-    fn build(&self, description: &crate::cmap::StreamDescription) -> Result<crate::cmap::Command> { unimplemented!() }
-
-    fn handle_response<'a>(
-        &self,
-        response: crate::cmap::CommandResponse) -> Result<Self::O> {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct Spec {}
-
-#[derive(Debug)]
-pub struct CursorWithSession<'a> {
-    session: &'a mut ClientSession,
 }
 
 /// A struct modeling the canonical name for a collection in MongoDB.

@@ -12,25 +12,27 @@ use crate::{
     operation::{Operation, OperationContext},
     options::{SelectionCriteria, StreamAddress},
     results::GetMoreResult,
-    Namespace,
+    Namespace, client::ClientSession,
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct GetMore {
+pub(crate) struct GetMore<'a> {
     ns: Namespace,
     cursor_id: i64,
     selection_criteria: SelectionCriteria,
     batch_size: Option<u32>,
     max_time: Option<Duration>,
+    session: Option<&'a mut ClientSession>,
 }
 
-impl GetMore {
+impl<'a> GetMore<'a> {
     pub(crate) fn new(
         ns: Namespace,
         cursor_id: i64,
         address: StreamAddress,
         batch_size: Option<u32>,
         max_time: Option<Duration>,
+        session: Option<&'a mut ClientSession>,
     ) -> Self {
         Self {
             ns,
@@ -38,6 +40,7 @@ impl GetMore {
             selection_criteria: SelectionCriteria::from_address(address),
             batch_size,
             max_time,
+            session,
         }
     }
 
@@ -50,7 +53,7 @@ impl GetMore {
     }
 }
 
-impl Operation for GetMore {
+impl<'a> Operation for GetMore<'a> {
     type O = GetMoreResult;
     const NAME: &'static str = "getMore";
 
@@ -96,6 +99,10 @@ impl Operation for GetMore {
 
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
         Some(&self.selection_criteria)
+    }
+
+    fn session(&mut self) -> Option<&mut ClientSession> {
+        self.session
     }
 }
 

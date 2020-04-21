@@ -23,8 +23,7 @@ use crate::{
     sdam::{Server, SessionSupportStatus, Topology},
 };
 use session::ServerSessionPool;
-pub use session::{ClientSession};
-pub(crate) use session::{ServerSession, ClusterTime};
+pub(crate) use session::{ClientSession, ServerSession, ClusterTime, SESSIONS_UNSUPPORTED_COMMANDS};
 use tokio::sync::RwLock;
 
 const DEFAULT_SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -90,7 +89,7 @@ impl Client {
 
         let inner = Arc::new(ClientInner {
             topology: Topology::new(options.clone())?,
-            session_pool: ServerSessionPool::default(),
+            session_pool: ServerSessionPool::new(),
             cluster_time: RwLock::new(None),
             options,
         });
@@ -190,6 +189,7 @@ impl Client {
 
     /// Ends a server session via the `endSessions` command if the session is not dirty.
     /// This method ignores any errors returned as part of the session ending process.
+    #[allow(dead_code)]
     async fn end_server_session(&self, session: ServerSession) {
         async fn try_end(client: &Client, session: ServerSession) -> Result<()> {
             let server = client

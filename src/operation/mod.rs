@@ -72,43 +72,12 @@ pub(crate) trait Operation {
         None
     }
 
-    fn session(&mut self) -> Option<&mut ClientSession> {
-        None
+    /// Whether this operation supports sessions or not.
+    fn supports_sessions(&self) -> bool {
+        true
     }
-}
-
-pub(crate) struct OperationResult<'a, T> {
-    pub(crate) result: T,
-    pub(crate) context: OperationContext<'a>,
-}
-
-/// A trait modeling the behavior of a server side operation.
-pub(crate) trait LifetimeOperation {
-    /// The output type of this operation.
-    type O: Debug;
-
-    /// The name of the server side command associated with this operation.
-    const NAME: &'static str;
-
-    /// Returns the command that should be sent to the server as part of this operation.
-    fn build(&self, description: &StreamDescription) -> Result<Command>;
-
-    /// Interprets the server response to the command.
-    fn handle_response(
-        &self,
-        response: CommandResponse
-    ) -> Result<Self::O>;
     
-    /// Criteria to use for selecting the server that this operation will be executed on.
-    fn selection_criteria(&self) -> Option<&SelectionCriteria> {
-        None
-    }
-
-    /// The write concern to use for for this operation, if any.
-    fn write_concern(&self) -> Option<&WriteConcern> {
-        None
-    }
-
+    /// The explicit session provided by the user for this operation, if any.
     fn session(&mut self) -> Option<&mut ClientSession> {
         None
     }
@@ -137,9 +106,9 @@ pub(crate) fn append_options<T: Serialize>(doc: &mut Document, options: Option<&
 
 /// Struct containing information about the context in which a given operation was executed.
 #[derive(Debug)]
-pub(crate) struct OperationContext<'a> {
+pub(crate) struct OperationContext {
     /// The implicit session that was created as part of executing the operation, if any.
-    pub(crate) session: Option<&'a mut ClientSession>,
+    pub(crate) implicit_session: Option<ClientSession>,
 }
 
 #[derive(Deserialize)]

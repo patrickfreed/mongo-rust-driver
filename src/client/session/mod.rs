@@ -1,75 +1,75 @@
 use std::{
-    collections::VecDeque,
-    ops::Deref,
-    sync::Arc,
-    time::{Duration, Instant}, cell::{Ref, RefCell},
+    collections::{HashSet, VecDeque},
+    time::{Duration, Instant},
 };
 
 use bson::{doc, spec::BinarySubtype, Bson, Document, TimeStamp};
+use lazy_static::lazy_static;
 use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{Client, RUNTIME};
 
+lazy_static! {
+    pub(crate) static ref SESSIONS_UNSUPPORTED_COMMANDS: HashSet<&'static str> = {
+        let mut hash_set = HashSet::new();
+        hash_set.insert("killcursors");
+        hash_set.insert("parallelcollectionscan");
+        hash_set
+    };
+}
+
 /// Session to be used with client operations. This acts as a handle to a server session.
 /// This keeps the details of how server sessions are pooled opaque to users.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ClientSession {
-    state: RefCell<Arc<ClientSessionState>>,
+    cluster_time: Option<ClusterTime>,
+    server_session: ServerSession,
     client: Client,
 }
 
 impl ClientSession {
+    /// Creates a new `ClientSession` wrapping the provided server session.
     pub(crate) fn new(server_session: ServerSession, client: Client) -> Self {
         Self {
             client,
-            state: RefCell::new(Arc::new(ClientSessionState::new(server_session))),
+            server_session,
+            cluster_time: None,
         }
     }
 
     /// The id of this session.
-    pub(crate) fn id(&self) -> impl Deref<Target = Document> + '_ {
-        // state.server_session.assert_is_non_null();
-        Ref::map(self.state.borrow(), |state| &state.server_session.id)
+    pub(crate) fn id(&self) -> &Document {
+        self.server_session.assert_is_non_null();
+        &self.server_session.id
     }
 
+    /// The highest seen cluster time this session has seen so far.
+    /// This will be `None` if this session has not been used in an operation yet.
     pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {
-        todo!()
-        // self.state.cluster_time.as_ref()
+        self.cluster_time.as_ref()
     }
 
+    /// Set the cluster time to the provided one if it is greater than this session's highest seen cluster time or
+    /// if this session's cluster time is `None`.
     pub(crate) fn advance_cluster_time(&mut self, to: ClusterTime) {
-        todo!()
-        // self.state.cluster_time = Some(to);
-    }
-
-    fn take(&mut self) -> ClientSessionState {
-        todo!()
-        // self.state.replace(ClientSessionState::new(ServerSession::null()))
+        if self.cluster_time().map(|ct| ct < &to).unwrap_or(true) {
+            self.cluster_time = Some(to);
+        }
     }
 }
 
-// impl Drop for ClientSession {
-//     fn drop(&mut self) {
-//         let client = self.client.clone();
-//         let state = self.take();
-//         RUNTIME.execute(async move {
-//             client.check_in_server_session(state.server_session).await;
-//         })
-//     }
-// }
-
-/// Struct encapsulating shared state among `ClientSession` instances.
-#[derive(Debug)]
-struct ClientSessionState {
-    cluster_time: Option<ClusterTime>,
-    server_session: ServerSession,
-}
-
-impl ClientSessionState {
-    fn new(server_session: ServerSession) -> Self {
-        Self { cluster_time: None, server_session }
+impl Drop for ClientSession {
+    fn drop(&mut self) {
+        fn take_server_session(session: &mut ClientSession) -> ServerSession {
+            std::mem::replace(&mut session.server_session, ServerSession::null())
+        }
+        let client = self.client.clone();
+        let server_session = take_server_session(self);
+        RUNTIME.execute(async move {
+            client.check_in_server_session(server_session).await;
+        })
     }
 }
 
@@ -120,12 +120,16 @@ impl ServerSession {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ServerSessionPool {
     pool: Mutex<VecDeque<ServerSession>>,
 }
 
 impl ServerSessionPool {
+    pub(super) fn new() -> Self {
+        Self { pool: Default::default() }
+    }
+
     /// Checks out a server session from the pool. Before doing so, it first clears out all the
     /// expired ssessions. If there are no sessions left in the pool after clearing expired ones
     /// out, a new session will be created.

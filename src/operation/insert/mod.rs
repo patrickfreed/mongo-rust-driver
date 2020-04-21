@@ -10,7 +10,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
     operation::{append_options, Operation, OperationContext, WriteResponseBody},
-    options::InsertManyOptions,
+    options::{WriteConcern, InsertManyOptions},
     results::InsertManyResult,
     Namespace, client::ClientSession,
 };
@@ -69,8 +69,6 @@ impl Operation for Insert {
         ))
     }
 
-    
-    
     fn handle_response(
         &self,
         response: CommandResponse,
@@ -93,7 +91,7 @@ impl Operation for Insert {
         Ok(InsertManyResult { inserted_ids: map })
     }
 
-    fn session(&mut self) -> Option<&mut ClientSession> {
-        self.session.as_mut()
+    fn write_concern(&self) -> Option<&WriteConcern> {
+        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
     }
 }

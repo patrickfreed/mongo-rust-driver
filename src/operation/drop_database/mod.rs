@@ -7,7 +7,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::Result,
     operation::{append_options, Operation, OperationContext, WriteConcernOnlyBody},
-    options::DropDatabaseOptions,
+    options::{WriteConcern, DropDatabaseOptions},
 };
 
 #[derive(Debug)]
@@ -51,5 +51,9 @@ impl Operation for DropDatabase {
         context: OperationContext,
     ) -> Result<Self::O> {
         response.body::<WriteConcernOnlyBody>()?.validate()
+    }
+
+    fn write_concern(&self) -> Option<&WriteConcern> {
+        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
     }
 }

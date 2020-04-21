@@ -363,10 +363,6 @@ impl TopologyDescription {
         self.servers.retain(|host, _| hosts.contains(host));
     }
 
-    pub(crate) fn topology_type(&self) -> TopologyType {
-        self.topology_type
-    }
-
     pub(crate) fn session_support_status(&self) -> SessionSupportStatus {
         self.session_support_status
     }

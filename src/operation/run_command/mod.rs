@@ -5,6 +5,7 @@ use bson::Document;
 
 use super::{Operation, OperationContext};
 use crate::{
+    client::SESSIONS_UNSUPPORTED_COMMANDS,
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
     selection_criteria::SelectionCriteria,
@@ -29,6 +30,13 @@ impl RunCommand {
             selection_criteria,
         }
     }
+
+    fn command_name(&self) -> Option<&str> {
+        self.command
+            .keys()
+            .next()
+            .map(String::as_str)
+    }
 }
 
 impl Operation for RunCommand {
@@ -40,16 +48,13 @@ impl Operation for RunCommand {
 
     fn build(&self, description: &StreamDescription) -> Result<Command> {
         let command_name =
-            self.command
-                .keys()
-                .next()
-                .cloned()
-                .ok_or_else(|| ErrorKind::ArgumentError {
-                    message: "an empty document cannot be passed to a run_command operation".into(),
-                })?;
+            self.command_name()
+            .ok_or_else(|| ErrorKind::ArgumentError {
+                message: "an empty document cannot be passed to a run_command operation".into(),
+            })?;
 
         Ok(Command::new(
-            command_name,
+            command_name.to_string(),
             self.db.clone(),
             self.command.clone(),
         ))
@@ -65,5 +70,11 @@ impl Operation for RunCommand {
 
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
         self.selection_criteria.as_ref()
+    }
+
+    fn supports_sessions(&self) -> bool {
+        self.command_name().map(|command_name| {
+            SESSIONS_UNSUPPORTED_COMMANDS.contains(command_name.to_lowercase().as_str())
+        }).unwrap_or(false)
     }
 }

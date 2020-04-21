@@ -116,8 +116,8 @@ define_if_single_runtime_enabled! {
 
     #[cfg(not(feature = "sync"))]
     pub use crate::{
-        client::{Client, ClientSession},
-        coll::{Collection, Namespace, CursorWithSession},
+        client::Client,
+        coll::{Collection},
         cursor::Cursor,
         db::Database,
     };

@@ -10,7 +10,7 @@ use crate::{
     cmap::{Connection, StreamDescription},
     error::{ErrorKind, Result},
     event::command::{CommandFailedEvent, CommandStartedEvent, CommandSucceededEvent},
-    operation::{Operation, OperationContext, LifetimeOperation, OperationResult},
+    operation::{Operation, OperationContext},
     options::{SelectionCriteria, WriteConcern},
     sdam::{Server, SessionSupportStatus},
 };
@@ -89,43 +89,24 @@ impl Client {
             .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria())
             .await;
 
-        let mut session: Option<ClientSession> = None;
-        let mut started_implicit = false;
-        
-        let topology_session_support_status = {
-            let initial_status = self.inner.topology.session_support_status().await;
+        let mut implicit_session: Option<ClientSession> = None;
+        let mut session: Option<&mut ClientSession> = None;
 
-            // Need to guarantee that we're connected to at least one server that can determine if
-            // sessions are supported or not.
-            match initial_status {
-                SessionSupportStatus::Undetermined => {
-                    let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
-                        server_info.server_type().is_data_bearing()
-                    }));
-                    let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
-                    self.inner.topology.session_support_status().await
-                }
-                _ => initial_status,
-            }
-        };
-
-        let command_supports_sessions =
-            matches!(cmd.name.as_str(), "parallelCollectionScan" | "killCursors");
-
-        let wc_supports_sessions =
-            op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
-
-        if let SessionSupportStatus::Supported {
-            logical_session_timeout,
-        } = topology_session_support_status
-        {
-            if command_supports_sessions {
+        if op.supports_sessions() {
+            if let SessionSupportStatus::Supported {
+                logical_session_timeout,
+            } = self.get_session_support_status().await?
+            {
                 // We also verify that the server we're sending the command to supports sessions
                 // just in case its monitor hasn't updated the topology description
                 // yet.
                 if let Some(server_timeout) = stream_description.logical_session_timeout {
+                    // sessions cannot be used with unacknowledged writes.
+                    let wc_supports_sessions =
+                        op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
+
                     match op.session() {
-                        Some(session) if !wc_supports_sessions => {
+                        Some(_) if !wc_supports_sessions => {
                             return Err(ErrorKind::ArgumentError {
                                 message: "Cannot use ClientSessions with unacknowledged write \
                                           concern"
@@ -134,17 +115,19 @@ impl Client {
                             .into())
                         }
                         Some(explicit_session) => {
-                            session = Some(explicit_session.clone());
+                            session = Some(explicit_session);
                         },
-                        None => {
+                        None if wc_supports_sessions => {
                             let timeout = std::cmp::min(server_timeout, logical_session_timeout);
-                            session = Some(self.start_session_with_timeout(timeout).await);
-                            started_implicit = true;
-                        }
+                            implicit_session = Some(self.start_session_with_timeout(timeout).await);
+                            session = Some(implicit_session.as_mut().unwrap());
+                        },
+                        None => {}
                     }
                 }
             }
         }
+
         if let Some(ref session) = session {
             cmd.set_session(session);
         }
@@ -226,208 +209,30 @@ impl Client {
                     handler.handle_command_succeeded_event(command_succeeded_event);
                 });
                 if let Some(cluster_time) = response.cluster_time() {
-                    self.update_cluster_time(&cluster_time).await;
+                    self.update_cluster_time(cluster_time).await;
                     if let Some(ref mut session) = session {
-                        session.advance_cluster_time(cluster_time)
+                        session.advance_cluster_time(cluster_time.clone())
                     }
                 }
-                op.handle_response(response, OperationContext {
-                    session: None,
-                })
+                op.handle_response(response, OperationContext { implicit_session })
             }
         }
     }
 
-    pub(crate) async fn execute_lifetime_operation<'a, T: LifetimeOperation>(
-        &self,
-        op: T,
-        session: Option<&'a mut ClientSession>,
-    ) -> Result<OperationResult<'a, T::O>> {
-        todo!()
-        // let server = self.select_server(op.selection_criteria()).await?;
+    async fn get_session_support_status(&self) -> Result<SessionSupportStatus> {
+        let initial_status = self.inner.topology.session_support_status().await;
 
-        // let mut conn = match server.checkout_connection().await {
-        //     Ok(conn) => conn,
-        //     Err(err) => {
-        //         self.inner
-        //             .topology
-        //             .handle_pre_handshake_error(err.clone(), server.address.clone())
-        //             .await;
-        //         return Err(err);
-        //     }
-        // };
-
-        // match self.execute_lifetime_operation_on_connection(op, &mut conn).await {
-        //     Ok(result) => Ok(result),
-        //     Err(err) => {
-        //         self.inner
-        //             .topology
-        //             .handle_post_handshake_error(err.clone(), conn, server)
-        //             .await;
-        //         Err(err)
-        //     }
-        // }
-    }
-
-    /// Executes an operation on a given connection.
-    async fn execute_lifetime_operation_on_connection<'a, T: LifetimeOperation>(
-        &self,
-        mut op: T,
-        connection: &mut Connection,
-    ) -> Result<OperationResult<'a, T::O>> {
-        let stream_description: StreamDescription = connection.stream_description()?.clone();
-
-        let mut cmd = op.build(&stream_description)?;
-        self.inner
-            .topology
-            .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria())
-            .await;
-
-        let mut session: Option<ClientSession> = None;
-        let mut started_implicit = false;
-        
-        let topology_session_support_status = {
-            let initial_status = self.inner.topology.session_support_status().await;
-
-            // Need to guarantee that we're connected to at least one server that can determine if
-            // sessions are supported or not.
-            match initial_status {
-                SessionSupportStatus::Undetermined => {
-                    let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
-                        server_info.server_type().is_data_bearing()
-                    }));
-                    let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
-                    self.inner.topology.session_support_status().await
-                }
-                _ => initial_status,
+        // Need to guarantee that we're connected to at least one server that can determine if
+        // sessions are supported or not.
+        match initial_status {
+            SessionSupportStatus::Undetermined => {
+                let criteria = SelectionCriteria::Predicate(Arc::new(move |server_info| {
+                    server_info.server_type().is_data_bearing()
+                }));
+                let _: Arc<Server> = self.select_server(Some(&criteria)).await?;
+                Ok(self.inner.topology.session_support_status().await)
             }
-        };
-
-        let command_supports_sessions =
-            matches!(cmd.name.as_str(), "parallelCollectionScan" | "killCursors");
-
-        let wc_supports_sessions =
-            op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
-
-        if let SessionSupportStatus::Supported {
-            logical_session_timeout,
-        } = topology_session_support_status
-        {
-            if command_supports_sessions {
-                // We also verify that the server we're sending the command to supports sessions
-                // just in case its monitor hasn't updated the topology description
-                // yet.
-                if let Some(server_timeout) = stream_description.logical_session_timeout {
-                    match op.session() {
-                        Some(session) if !wc_supports_sessions => {
-                            return Err(ErrorKind::ArgumentError {
-                                message: "Cannot use ClientSessions with unacknowledged write \
-                                          concern"
-                                    .to_string(),
-                            }
-                            .into())
-                        }
-                        Some(explicit_session) => {
-                            session = Some(explicit_session.clone());
-                        },
-                        None => {
-                            let timeout = std::cmp::min(server_timeout, logical_session_timeout);
-                            session = Some(self.start_session_with_timeout(timeout).await);
-                            started_implicit = true;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(ref session) = session {
-            cmd.set_session(session);
-        }
-        
-        let session_cluster_time = session.as_ref().and_then(|session| session.cluster_time());
-        let client_cluster_time = self.inner.cluster_time.read().await;
-        let max_cluster_time = std::cmp::max(session_cluster_time, client_cluster_time.as_ref());
-        if let Some(cluster_time) = max_cluster_time {
-            cmd.set_cluster_time(cluster_time);
-        }
-
-        let connection_info = connection.info();
-        let request_id = crate::cmap::conn::next_request_id();
-
-        self.emit_command_event(|handler| {
-            let should_redact = REDACTED_COMMANDS.contains(cmd.name.to_lowercase().as_str());
-
-            let command_body = if should_redact {
-                Document::new()
-            } else {
-                cmd.body.clone()
-            };
-            let command_started_event = CommandStartedEvent {
-                command: command_body,
-                db: cmd.target_db.clone(),
-                command_name: cmd.name.clone(),
-                request_id,
-                connection: connection_info.clone(),
-            };
-
-            handler.handle_command_started_event(command_started_event);
-        });
-
-        let start_time = PreciseTime::now();
-
-        let response_result = connection
-            .send_command(cmd.clone(), request_id)
-            .await
-            .and_then(|response| {
-                response.validate()?;
-                Ok(response)
-            });
-
-        let end_time = PreciseTime::now();
-        let duration = start_time.to(end_time).to_std()?;
-
-        match response_result {
-            Err(error) => {
-                self.emit_command_event(|handler| {
-                    let command_failed_event = CommandFailedEvent {
-                        duration,
-                        command_name: cmd.name,
-                        failure: error.clone(),
-                        request_id,
-                        connection: connection_info,
-                    };
-
-                    handler.handle_command_failed_event(command_failed_event);
-                });
-                Err(error)
-            }
-            Ok(response) => {
-                self.emit_command_event(|handler| {
-                    let should_redact =
-                        REDACTED_COMMANDS.contains(cmd.name.to_lowercase().as_str());
-                    let reply = if should_redact {
-                        Document::new()
-                    } else {
-                        response.raw_response.clone()
-                    };
-
-                    let command_succeeded_event = CommandSucceededEvent {
-                        duration,
-                        reply,
-                        command_name: cmd.name.clone(),
-                        request_id,
-                        connection: connection_info,
-                    };
-                    handler.handle_command_succeeded_event(command_succeeded_event);
-                });
-                if let Some(cluster_time) = response.cluster_time() {
-                    self.update_cluster_time(&cluster_time).await;
-                    if let Some(ref mut session) = session {
-                        session.advance_cluster_time(cluster_time)
-                    }
-                }
-                let result = op.handle_response(response)?;
-                Ok(OperationResult { result, context: OperationContext { session: None } })
-            }
+            _ => Ok(initial_status),
         }
     }
 }
