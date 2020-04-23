@@ -6,7 +6,7 @@ use bson::doc;
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::Result,
-    operation::{append_options, Operation,  WriteConcernOnlyBody},
+    operation::{append_options, Operation, WriteConcernOnlyBody},
     options::{DropDatabaseOptions, WriteConcern},
 };
 
@@ -45,11 +45,7 @@ impl Operation for DropDatabase {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         response.body::<WriteConcernOnlyBody>()?.validate()
     }
 

@@ -1,35 +1,46 @@
 mod common;
 
-use std::{task::{Poll, Context}, pin::Pin};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-use futures::{Stream, future::BoxFuture};
 use bson::Document;
+use futures::{future::BoxFuture, Stream};
 
-use crate::{results::GetMoreResult, error::Result, client::ClientSession, cursor::CursorSpecification, Client, operation::GetMore};
-use common::{GetMoreProvider, GetMoreProviderResult, GenericCursor};
+use crate::{
+    client::ClientSession,
+    cursor::CursorSpecification,
+    error::Result,
+    operation::GetMore,
+    results::GetMoreResult,
+    Client,
+};
+use common::{GenericCursor, GetMoreProvider, GetMoreProviderResult};
 
 pub struct Cursor {
-    wrapped_cursor: GenericCursor<ImplicitSessionGetMoreProvider>
+    wrapped_cursor: GenericCursor<ImplicitSessionGetMoreProvider>,
 }
 
 impl Cursor {
+    #[allow(dead_code)]
     pub(crate) fn new(client: Client, spec: CursorSpecification, session: ClientSession) -> Self {
         Self {
-            wrapped_cursor: GenericCursor::new(client, spec, ImplicitSessionGetMoreProvider::new(session))
+            wrapped_cursor: GenericCursor::new(
+                client,
+                spec,
+                ImplicitSessionGetMoreProvider::new(session),
+            ),
         }
     }
 }
 
 impl Stream for Cursor {
     type Item = Result<Document>;
-    
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.wrapped_cursor).poll_next(cx)
     }
-    
 }
 
 struct ExecutionResult {
@@ -45,7 +56,7 @@ impl GetMoreProviderResult for ExecutionResult {
 
 enum ImplicitSessionGetMoreProvider {
     Executing(BoxFuture<'static, ExecutionResult>),
-    Idle(ClientSession)
+    Idle(ClientSession),
 }
 
 impl ImplicitSessionGetMoreProvider {
@@ -60,7 +71,7 @@ impl GetMoreProvider for ImplicitSessionGetMoreProvider {
     fn executing_future(&mut self) -> Option<&mut Self::GetMoreFuture> {
         match self {
             Self::Executing(ref mut future) => Some(future),
-            Self::Idle(_) => None
+            Self::Idle(_) => None,
         }
     }
 
@@ -69,21 +80,21 @@ impl GetMoreProvider for ImplicitSessionGetMoreProvider {
     }
 
     fn start_execution(&mut self, spec: CursorSpecification, client: Client) {
-        take_mut::take(self, |self_| {
-            match self_ {
-                Self::Idle(mut session) => {
-                    let future = Box::pin(async move {
-                        let get_more = GetMore::new(spec);
-                        let get_more_result = client.execute_operation_with_session(get_more, &mut session).await;
-                        ExecutionResult {
-                            get_more_result,
-                            session
-                        }
-                    });
-                    Self::Executing(future)
-                }
-                Self::Executing(_) => self_,
+        take_mut::take(self, |self_| match self_ {
+            Self::Idle(mut session) => {
+                let future = Box::pin(async move {
+                    let get_more = GetMore::new(spec);
+                    let get_more_result = client
+                        .execute_operation_with_session(get_more, &mut session)
+                        .await;
+                    ExecutionResult {
+                        get_more_result,
+                        session,
+                    }
+                });
+                Self::Executing(future)
             }
+            Self::Executing(_) => self_,
         })
     }
 }

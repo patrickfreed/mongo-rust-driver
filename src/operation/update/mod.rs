@@ -8,7 +8,7 @@ use crate::{
     bson_util,
     cmap::{Command, CommandResponse, StreamDescription},
     error::{convert_bulk_errors, Result},
-    operation::{Operation,  WriteResponseBody},
+    operation::{Operation, WriteResponseBody},
     options::{UpdateModifications, UpdateOptions, WriteConcern},
     results::UpdateResult,
     Namespace,
@@ -109,11 +109,7 @@ impl Operation for Update {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: WriteResponseBody<UpdateBody> = response.body()?;
         body.validate().map_err(convert_bulk_errors)?;
 

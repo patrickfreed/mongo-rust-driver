@@ -90,11 +90,7 @@ impl Operation for FindAndModify {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: ResponseBody = response.body()?;
         match body.value {
             Bson::Document(doc) => Ok(Some(doc)),

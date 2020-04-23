@@ -96,11 +96,7 @@ impl Operation for Find {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
         Ok(CursorSpecification {

@@ -56,17 +56,13 @@ pub(crate) trait Operation {
     fn build(&self, description: &StreamDescription) -> Result<Command>;
 
     /// Interprets the server response to the command.
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O>;
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O>;
 
     /// The name of the server side command associated with this operation.
     fn name(&self) -> &str {
         Self::NAME
     }
-    
+
     /// Criteria to use for selecting the server that this operation will be executed on.
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
         None
@@ -79,7 +75,9 @@ pub(crate) trait Operation {
 
     /// Returns whether the result of this operation is acknowledged or not.
     fn is_acknowledged(&self) -> bool {
-        self.write_concern().map(WriteConcern::is_acknowledged).unwrap_or(true)
+        self.write_concern()
+            .map(WriteConcern::is_acknowledged)
+            .unwrap_or(true)
     }
 
     /// Whether this operation supports sessions or not.

@@ -64,11 +64,7 @@ impl Operation for ListCollections {
         Ok(Command::new(Self::NAME.to_string(), self.db.clone(), body))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
         Ok(CursorSpecification {

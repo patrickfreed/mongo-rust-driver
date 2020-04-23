@@ -7,13 +7,13 @@ use bson::{doc, Document};
 use serde::Deserialize;
 
 use crate::{
-    client::ClientSession,
     cmap::{Command, CommandResponse, StreamDescription},
+    cursor::CursorSpecification,
     error::{ErrorKind, Result},
     operation::Operation,
-    options::{SelectionCriteria, StreamAddress},
+    options::SelectionCriteria,
     results::GetMoreResult,
-    Namespace, cursor::CursorSpecification,
+    Namespace,
 };
 
 #[derive(Debug)]
@@ -34,14 +34,6 @@ impl GetMore {
             batch_size: spec.batch_size,
             max_time: spec.max_time,
         }
-    }
-
-    pub(crate) fn namespace(&self) -> &Namespace {
-        &self.ns
-    }
-
-    pub(crate) fn cursor_id(&self) -> i64 {
-        self.cursor_id
     }
 }
 
@@ -77,10 +69,7 @@ impl Operation for GetMore {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: GetMoreResponseBody = response.body()?;
         Ok(GetMoreResult {
             batch: body.cursor.next_batch,

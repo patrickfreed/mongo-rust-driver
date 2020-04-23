@@ -1,7 +1,11 @@
-use std::{pin::Pin, collections::VecDeque, task::{Context, Poll}};
+use crate::{cursor::CursorSpecification, error::Result, results::GetMoreResult, Client};
 use bson::Document;
 use futures::{Future, Stream};
-use crate::{Client, cursor::CursorSpecification, error::Result, results::GetMoreResult};
+use std::{
+    collections::VecDeque,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 pub(super) struct GenericCursor<T: GetMoreProvider + Unpin> {
     provider: T,
@@ -11,6 +15,7 @@ pub(super) struct GenericCursor<T: GetMoreProvider + Unpin> {
     exhausted: bool,
 }
 
+#[allow(dead_code)]
 impl<T: GetMoreProvider + Unpin> GenericCursor<T> {
     pub(super) fn new(client: Client, spec: CursorSpecification, get_more_provider: T) -> Self {
         Self {
@@ -22,13 +27,10 @@ impl<T: GetMoreProvider + Unpin> GenericCursor<T> {
         }
     }
 }
-    
+
 impl<T: GetMoreProvider + Unpin> Stream for GenericCursor<T> {
     type Item = Result<Document>;
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             if let Some(future) = self.provider.executing_future() {
                 match Pin::new(future).poll(cx) {
@@ -42,10 +44,10 @@ impl<T: GetMoreProvider + Unpin> Stream for GenericCursor<T> {
                                     get_more_result.batch.into_iter().collect();
                                 self.exhausted = get_more_result.exhausted;
                                 self.buffer = buffer;
-                            },
-                            Err(e) => return Poll::Ready(Some(Err(e)))
+                            }
+                            Err(e) => return Poll::Ready(Some(Err(e))),
                         }
-                    },
+                    }
                     Poll::Pending => return Poll::Pending,
                 }
             }
@@ -56,7 +58,7 @@ impl<T: GetMoreProvider + Unpin> Stream for GenericCursor<T> {
                     let spec = self.spec.clone();
                     let client = self.client.clone();
                     self.provider.start_execution(spec, client);
-                },
+                }
                 None => return Poll::Ready(None),
             }
         }
@@ -66,7 +68,7 @@ impl<T: GetMoreProvider + Unpin> Stream for GenericCursor<T> {
 pub(super) trait GetMoreProvider {
     type GetMoreResult: GetMoreProviderResult;
     type GetMoreFuture: Future<Output = Self::GetMoreResult> + Unpin;
-    
+
     fn executing_future(&mut self) -> Option<&mut Self::GetMoreFuture>;
 
     fn clear_execution(&mut self, result: Self::GetMoreResult);

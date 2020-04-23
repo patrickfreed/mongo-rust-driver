@@ -64,10 +64,7 @@ impl Operation for Aggregate {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
         if self.is_out_or_merge() {

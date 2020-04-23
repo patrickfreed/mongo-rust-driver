@@ -11,13 +11,13 @@ use derivative::Derivative;
 use futures::{future::BoxFuture, stream::Stream};
 
 use crate::{
-    error::{Error, Result},
+    error::Result,
     operation::GetMore,
     options::StreamAddress,
     results::GetMoreResult,
     Client,
     Namespace,
-    RUNTIME, client::ClientSession, Collection,
+    RUNTIME, client::ClientSession,
 };
 
 #[derive(Debug, Clone)]
@@ -30,16 +30,10 @@ pub(crate) struct CursorSpecification {
     pub(crate) buffer: VecDeque<Document>,
 }
 
-struct OC<'a> {
-    h: SessionCursorHandle<'a, 'a>
-}
-
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Cursor {
     session_cursor: SessionCursor,
-    #[derivative(Debug = "ignore")]
-    h: OC<'static>,
     session: ClientSession,
 }
 
@@ -68,6 +62,7 @@ pub(crate) struct SessionCursor {
     spec: CursorSpecification,
 }
 
+#[allow(dead_code)]
 impl SessionCursor {
     fn new(client: Client, spec: CursorSpecification) -> Self {
         Self {
@@ -190,16 +185,16 @@ impl<'session> GetMoreProvider for ExecutionState<'session> {
     fn start_execution(&mut self, spec: CursorSpecification, client: Client) { unimplemented!() }
 }
 
-struct OwnedCursor {
-    wrapped: GenericCursor<OwnedGetMoreProvider>,
-}
+// struct OwnedCursor {
+//     wrapped: GenericCursor<OwnedGetMoreProvider>,
+// }
 
-impl OwnedCursor {
-    pub(crate) fn new(spec: CursorSpecification, client: Client, session: ClientSession) -> Self {
-        let provider = OwnedGetMoreProvider::Idle(session);
-        Self { wrapped: GenericCursor::new(spec, client, provider) }
-    }
-}
+// impl OwnedCursor {
+//     pub(crate) fn new(spec: CursorSpecification, client: Client, session: ClientSession) -> Self {
+//         let provider = OwnedGetMoreProvider::Idle(session);
+//         Self { wrapped: GenericCursor::new(spec, client, provider) }
+//     }
+// }
 
 // impl Collection {
 //     async fn owned_find(&self) -> OwnedCursor {
@@ -262,17 +257,17 @@ struct GenericCursor<T: GetMoreProvider + Unpin> {
     exhausted: bool,
 }
 
-impl<T: GetMoreProvider + Unpin> GenericCursor<T> {
-    fn new(spec: CursorSpecification, client: Client, get_more_provider: T) -> Self {
-        Self {
-            exhausted: spec.id == 0,
-            spec,
-            client,
-            buffer: VecDeque::new(),
-            provider: get_more_provider,
-        }
-    }
-}
+// impl<T: GetMoreProvider + Unpin> GenericCursor<T> {
+//     fn new(spec: CursorSpecification, client: Client, get_more_provider: T) -> Self {
+//         Self {
+//             exhausted: spec.id == 0,
+//             spec,
+//             client,
+//             buffer: VecDeque::new(),
+//             provider: get_more_provider,
+//         }
+//     }
+// }
     
 impl<T: GetMoreProvider + Unpin> Stream for GenericCursor<T> {
     type Item = Result<Document>;

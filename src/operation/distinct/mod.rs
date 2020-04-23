@@ -70,11 +70,7 @@ impl Operation for Distinct {
             body,
         ))
     }
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         response.body::<ResponseBody>().map(|body| body.values)
     }
 

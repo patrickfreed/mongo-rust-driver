@@ -52,11 +52,7 @@ impl Operation for Count {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         response.body::<ResponseBody>().map(|body| body.n)
     }
 

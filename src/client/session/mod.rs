@@ -50,7 +50,7 @@ impl ClientSession {
     pub(crate) fn is_implicit(&self) -> bool {
         self.is_implicit
     }
-    
+
     /// The highest seen cluster time this session has seen so far.
     /// This will be `None` if this session has not been used in an operation yet.
     pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {

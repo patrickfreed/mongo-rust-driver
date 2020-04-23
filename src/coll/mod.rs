@@ -10,7 +10,6 @@ use serde::{de::Error, Deserialize, Deserializer};
 use self::options::*;
 use crate::{
     bson_util,
-    client::ClientSession,
     concern::{ReadConcern, WriteConcern},
     error::{convert_bulk_errors, BulkWriteError, BulkWriteFailure, ErrorKind, Result},
     operation::{
@@ -22,7 +21,6 @@ use crate::{
         Find,
         FindAndModify,
         Insert,
-        Operation,
         Update,
     },
     results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult},
@@ -326,9 +324,7 @@ impl Collection {
         client
             .execute_operation_with_implicit_sesssion(find)
             .await
-            .map(|(result, session)| {
-                Cursor::new(client.clone(), result, session)
-            })
+            .map(|(result, session)| Cursor::new(client.clone(), result, session))
     }
 
     /// Finds a single document in the collection matching `filter`.

@@ -10,7 +10,7 @@ use crate::{
     client::ClientSession,
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
-    operation::{append_options, Operation,  WriteResponseBody},
+    operation::{append_options, Operation, WriteResponseBody},
     options::{InsertManyOptions, WriteConcern},
     results::InsertManyResult,
     Namespace,
@@ -70,11 +70,7 @@ impl Operation for Insert {
         ))
     }
 
-    fn handle_response(
-        &self,
-        response: CommandResponse,
-        
-    ) -> Result<Self::O> {
+    fn handle_response(&self, response: CommandResponse) -> Result<Self::O> {
         let body: WriteResponseBody = response.body()?;
         body.validate()?;
 
