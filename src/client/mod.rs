@@ -23,7 +23,12 @@ use crate::{
     sdam::{Server, SessionSupportStatus, Topology},
 };
 use session::ServerSessionPool;
-pub(crate) use session::{ClientSession, ServerSession, ClusterTime, SESSIONS_UNSUPPORTED_COMMANDS};
+pub(crate) use session::{
+    ClientSession,
+    ClusterTime,
+    ServerSession,
+    SESSIONS_UNSUPPORTED_COMMANDS,
+};
 use tokio::sync::RwLock;
 
 const DEFAULT_SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -224,8 +229,8 @@ impl Client {
         )
     }
 
-    /// Sets the client's cluster time to the provided one if it is higher than the client's current highest
-    /// seen value.
+    /// Sets the client's cluster time to the provided one if it is higher than the client's current
+    /// highest seen value.
     async fn update_cluster_time(&self, cluster_time: &ClusterTime) {
         let mut client_time_lock = self.inner.cluster_time.write().await;
         if let Some(ref client_time) = *client_time_lock {
@@ -235,7 +240,7 @@ impl Client {
         }
         *client_time_lock = Some(cluster_time.clone());
     }
-    
+
     /// Get the address of the server selected according to the given criteria.
     /// This method is only used in tests.
     #[cfg(test)]

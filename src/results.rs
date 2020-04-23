@@ -60,7 +60,7 @@ pub struct DeleteResult {
     pub deleted_count: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct GetMoreResult {
     pub(crate) batch: Vec<Document>,
     pub(crate) exhausted: bool,

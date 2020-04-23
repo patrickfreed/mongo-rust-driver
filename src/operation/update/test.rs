@@ -7,7 +7,7 @@ use crate::{
     cmap::{CommandResponse, StreamDescription},
     concern::{Acknowledgment, WriteConcern},
     error::{ErrorKind, WriteConcernError, WriteError, WriteFailure},
-    operation::{Operation, OperationContext, Update},
+    operation::{Operation,  Update},
     options::{UpdateModifications, UpdateOptions},
     Namespace,
 };

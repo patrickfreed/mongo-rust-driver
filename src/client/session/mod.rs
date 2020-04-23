@@ -5,7 +5,7 @@ use std::{
 
 use bson::{doc, spec::BinarySubtype, Bson, Document, TimeStamp};
 use lazy_static::lazy_static;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -27,6 +27,7 @@ pub struct ClientSession {
     cluster_time: Option<ClusterTime>,
     server_session: ServerSession,
     client: Client,
+    is_implicit: bool,
 }
 
 impl ClientSession {
@@ -36,6 +37,7 @@ impl ClientSession {
             client,
             server_session,
             cluster_time: None,
+            is_implicit: true,
         }
     }
 
@@ -45,14 +47,18 @@ impl ClientSession {
         &self.server_session.id
     }
 
+    pub(crate) fn is_implicit(&self) -> bool {
+        self.is_implicit
+    }
+    
     /// The highest seen cluster time this session has seen so far.
     /// This will be `None` if this session has not been used in an operation yet.
     pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {
         self.cluster_time.as_ref()
     }
 
-    /// Set the cluster time to the provided one if it is greater than this session's highest seen cluster time or
-    /// if this session's cluster time is `None`.
+    /// Set the cluster time to the provided one if it is greater than this session's highest seen
+    /// cluster time or if this session's cluster time is `None`.
     pub(crate) fn advance_cluster_time(&mut self, to: ClusterTime) {
         if self.cluster_time().map(|ct| ct < &to).unwrap_or(true) {
             self.cluster_time = Some(to);
@@ -127,7 +133,9 @@ pub(crate) struct ServerSessionPool {
 
 impl ServerSessionPool {
     pub(super) fn new() -> Self {
-        Self { pool: Default::default() }
+        Self {
+            pool: Default::default(),
+        }
     }
 
     /// Checks out a server session from the pool. Before doing so, it first clears out all the

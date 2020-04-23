@@ -3,7 +3,7 @@ mod test;
 
 use bson::Document;
 
-use super::{Operation, OperationContext};
+use super::{Operation};
 use crate::{
     client::SESSIONS_UNSUPPORTED_COMMANDS,
     cmap::{Command, CommandResponse, StreamDescription},
@@ -32,10 +32,7 @@ impl RunCommand {
     }
 
     fn command_name(&self) -> Option<&str> {
-        self.command
-            .keys()
-            .next()
-            .map(String::as_str)
+        self.command.keys().next().map(String::as_str)
     }
 }
 
@@ -47,8 +44,8 @@ impl Operation for RunCommand {
     const NAME: &'static str = "$genericRunCommand";
 
     fn build(&self, description: &StreamDescription) -> Result<Command> {
-        let command_name =
-            self.command_name()
+        let command_name = self
+            .command_name()
             .ok_or_else(|| ErrorKind::ArgumentError {
                 message: "an empty document cannot be passed to a run_command operation".into(),
             })?;
@@ -63,7 +60,7 @@ impl Operation for RunCommand {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         Ok(response.raw_response)
     }
@@ -73,8 +70,10 @@ impl Operation for RunCommand {
     }
 
     fn supports_sessions(&self) -> bool {
-        self.command_name().map(|command_name| {
-            SESSIONS_UNSUPPORTED_COMMANDS.contains(command_name.to_lowercase().as_str())
-        }).unwrap_or(false)
+        self.command_name()
+            .map(|command_name| {
+                SESSIONS_UNSUPPORTED_COMMANDS.contains(command_name.to_lowercase().as_str())
+            })
+            .unwrap_or(false)
     }
 }

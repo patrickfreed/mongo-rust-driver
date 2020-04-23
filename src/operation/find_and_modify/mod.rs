@@ -19,7 +19,8 @@ use crate::{
         Namespace,
     },
     error::{ErrorKind, Result},
-    operation::{append_options, Operation, OperationContext}, options::WriteConcern,
+    operation::{append_options, Operation},
+    options::WriteConcern,
 };
 
 pub(crate) struct FindAndModify {
@@ -92,7 +93,7 @@ impl Operation for FindAndModify {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         let body: ResponseBody = response.body()?;
         match body.value {

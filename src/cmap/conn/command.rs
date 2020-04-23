@@ -1,12 +1,12 @@
 use std::ops::Deref;
 
-use bson::{Bson, Document, doc};
+use bson::{doc, Bson, Document};
 use serde::de::DeserializeOwned;
 
 use super::wire::Message;
 use crate::{
     bson_util,
-    client::{ClusterTime, ClientSession},
+    client::{ClientSession, ClusterTime},
     error::{CommandError, ErrorKind, Result},
     options::StreamAddress,
     selection_criteria::ReadPreference,
@@ -54,9 +54,12 @@ impl Command {
 
     pub(crate) fn set_cluster_time(&mut self, cluster_time: &ClusterTime) {
         if let Ok(doc) = bson::to_bson(cluster_time) {
-            self.body.insert("$clusterTime", doc! {
-                "clusterTime": doc,
-            });
+            self.body.insert(
+                "$clusterTime",
+                doc! {
+                    "clusterTime": doc,
+                },
+            );
         }
     }
 }
@@ -92,9 +95,9 @@ impl CommandResponse {
 
     pub(crate) fn new(source: StreamAddress, message: Message) -> Result<Self> {
         let raw_response = message.single_document_response()?;
-        let cluster_time = raw_response.get("$clusterTime").and_then(|subdoc| {
-            bson::from_bson(subdoc.clone()).ok()
-        });
+        let cluster_time = raw_response
+            .get("$clusterTime")
+            .and_then(|subdoc| bson::from_bson(subdoc.clone()).ok());
 
         Ok(Self {
             source,

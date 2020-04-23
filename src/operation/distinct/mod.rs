@@ -8,7 +8,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     coll::{options::DistinctOptions, Namespace},
     error::Result,
-    operation::{append_options, Operation, OperationContext},
+    operation::{append_options, Operation},
     selection_criteria::SelectionCriteria,
 };
 
@@ -73,7 +73,7 @@ impl Operation for Distinct {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         response.body::<ResponseBody>().map(|body| body.values)
     }

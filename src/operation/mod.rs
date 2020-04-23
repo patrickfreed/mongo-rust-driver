@@ -59,8 +59,13 @@ pub(crate) trait Operation {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O>;
+
+    /// The name of the server side command associated with this operation.
+    fn name(&self) -> &str {
+        Self::NAME
+    }
     
     /// Criteria to use for selecting the server that this operation will be executed on.
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
@@ -72,11 +77,16 @@ pub(crate) trait Operation {
         None
     }
 
+    /// Returns whether the result of this operation is acknowledged or not.
+    fn is_acknowledged(&self) -> bool {
+        self.write_concern().map(WriteConcern::is_acknowledged).unwrap_or(true)
+    }
+
     /// Whether this operation supports sessions or not.
     fn supports_sessions(&self) -> bool {
         true
     }
-    
+
     /// The explicit session provided by the user for this operation, if any.
     fn session(&mut self) -> Option<&mut ClientSession> {
         None
@@ -106,9 +116,12 @@ pub(crate) fn append_options<T: Serialize>(doc: &mut Document, options: Option<&
 
 /// Struct containing information about the context in which a given operation was executed.
 #[derive(Debug)]
-pub(crate) struct OperationContext {
+pub(crate) struct OperationResult<T> {
     /// The implicit session that was created as part of executing the operation, if any.
     pub(crate) implicit_session: Option<ClientSession>,
+
+    /// The result of the operation.
+    pub(crate) result: T,
 }
 
 #[derive(Deserialize)]

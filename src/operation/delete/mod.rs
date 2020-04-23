@@ -8,8 +8,8 @@ use crate::{
     coll::Namespace,
     collation::Collation,
     error::{convert_bulk_errors, Result},
-    operation::{append_options, Operation, OperationContext, WriteResponseBody},
-    options::{WriteConcern, DeleteOptions},
+    operation::{append_options, Operation,  WriteResponseBody},
+    options::{DeleteOptions, WriteConcern},
     results::DeleteResult,
 };
 
@@ -83,7 +83,7 @@ impl Operation for Delete {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         let body: WriteResponseBody = response.body()?;
         body.validate().map_err(convert_bulk_errors)?;
@@ -94,6 +94,8 @@ impl Operation for Delete {
     }
 
     fn write_concern(&self) -> Option<&WriteConcern> {
-        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
+        self.options
+            .as_ref()
+            .and_then(|options| options.write_concern.as_ref())
     }
 }

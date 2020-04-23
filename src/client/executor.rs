@@ -10,7 +10,7 @@ use crate::{
     cmap::{Connection, StreamDescription},
     error::{ErrorKind, Result},
     event::command::{CommandFailedEvent, CommandStartedEvent, CommandSucceededEvent},
-    operation::{Operation, OperationContext},
+    operation::{Operation, OperationResult},
     options::{SelectionCriteria, WriteConcern},
     sdam::{Server, SessionSupportStatus},
 };
@@ -32,24 +32,74 @@ lazy_static! {
 }
 
 impl Client {
-    /// Executes an operation and returns the connection used to do so along with the result of the
-    /// operation. This will be used primarily for the opening of exhaust cursors.
-    #[allow(dead_code)]
-    pub(crate) async fn execute_exhaust_operation<T: Operation>(
-        &self,
-        op: T,
-    ) -> Result<(T::O, Connection)> {
-        let server = self.select_server(op.selection_criteria()).await?;
-        let mut conn = server.checkout_connection().await?;
-        self.execute_operation_on_connection(op, &mut conn)
-            .await
-            .map(|r| (r, conn))
+    /// Execute the given operation.
+    ///
+    /// Server selection will performed using the criteria specified on the operation, if any, and
+    /// an implicit session will be created if the operation and write concern are compatible with sessions.
+    pub(crate) async fn execute_operation<T: Operation>(&self, op: T) -> Result<T::O> {
+        let mut implicit_session = self.start_implicit_session(&op).await?;
+        self.get_connection_and_execute_operation(op, implicit_session.as_mut()).await
     }
 
-    /// Execute the given operation, optionally specifying a connection used to do so.
-    /// If no connection is provided, server selection will performed using the criteria specified
-    /// on the operation, if any.
-    pub(crate) async fn execute_operation<T: Operation>(&self, op: T) -> Result<T::O> {
+    /// Execute the given operation with an implicit session, returning an error if one cannot be
+    /// created or the topology doesn't support them.
+    ///
+    /// Server selection will performed using the criteria specified on the operation, if any, and
+    /// an implicit session will be created if the operation and write concern are compatible with sessions.
+    ///
+    /// If an implicit session was created, it will be returned as part of the result.
+    pub(crate) async fn execute_operation_with_implicit_sesssion<T: Operation>(
+        &self,
+        op: T
+    ) -> Result<(T::O, ClientSession)> {
+        let implicit_session = self.start_implicit_session(&op).await?;
+
+        match implicit_session {
+            Some(mut implicit_session) => {
+                self.get_connection_and_execute_operation(op, Some(&mut implicit_session)).await.map(|result| {
+                    (result, implicit_session)
+                })
+            },
+            None => Err(ErrorKind::InternalError {
+                message: "failed to start an implicit session".to_string()
+            }.into()) 
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Execute the given operation with the given session.
+    /// Server selection will performed using the criteria specified on the operation
+    pub(crate) async fn execute_operation_with_session<'session, T: Operation>(
+        &self,
+        op: T,
+        session: &'session mut ClientSession
+    ) -> Result<T::O> {
+        if !session.is_implicit() {
+            if !op.supports_sessions() {
+                return Err(ErrorKind::ArgumentError {
+                    message: format!("{} does not support sessions", op.name())
+                }.into())
+            }
+            
+            if !op.is_acknowledged() {
+                return Err(ErrorKind::ArgumentError {
+                    message: "Cannot use ClientSessions with unacknowledged write \
+                              concern"
+                        .to_string(),
+                }.into())
+            }
+        }
+
+        self.get_connection_and_execute_operation(op, Some(session)).await
+    }
+
+    /// Checks out a connection and executes the given operation, using the provided session
+    /// if present.
+    async fn get_connection_and_execute_operation<'session, T: Operation>(
+        &self,
+        op: T,
+        session: Option<&'session mut ClientSession>
+    ) -> Result<T::O> {
         let server = self.select_server(op.selection_criteria()).await?;
 
         let mut conn = match server.checkout_connection().await {
@@ -63,7 +113,7 @@ impl Client {
             }
         };
 
-        match self.execute_operation_on_connection(op, &mut conn).await {
+        match self.execute_operation_on_connection(op, &mut conn, session).await {
             Ok(result) => Ok(result),
             Err(err) => {
                 self.inner
@@ -75,63 +125,102 @@ impl Client {
         }
     }
 
-    /// Executes an operation on a given connection.
-    async fn execute_operation_on_connection<T: Operation>(
+    /// Executes an operation on a given connection, using the provided session if present.
+    async fn execute_operation_on_connection<'session, T: Operation>(
         &self,
-        mut op: T,
+        op: T,
         connection: &mut Connection,
+        session: Option<&'session mut ClientSession>,
     ) -> Result<T::O> {
-        let stream_description: StreamDescription = connection.stream_description()?.clone();
+        let stream_description: StreamDescription =
+            connection.stream_description()?.clone();
 
         let mut cmd = op.build(&stream_description)?;
         self.inner
             .topology
-            .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria())
+            .update_command_with_read_pref(
+                connection.address(),
+                &mut cmd,
+                op.selection_criteria(),
+            )
             .await;
 
-        let mut implicit_session: Option<ClientSession> = None;
-        let mut session: Option<&mut ClientSession> = None;
+        // let mut implicit_session: Option<ClientSession> = None;
+        // let mut session: Option<&mut ClientSession> = None;
 
-        if op.supports_sessions() {
-            if let SessionSupportStatus::Supported {
-                logical_session_timeout,
-            } = self.get_session_support_status().await?
-            {
-                // We also verify that the server we're sending the command to supports sessions
-                // just in case its monitor hasn't updated the topology description
-                // yet.
-                if let Some(server_timeout) = stream_description.logical_session_timeout {
-                    // sessions cannot be used with unacknowledged writes.
-                    let wc_supports_sessions =
-                        op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
+        // // sessions cannot be used with unacknowledged writes.
+        // let wc_supports_sessions =
+        //     op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
 
-                    match op.session() {
-                        Some(_) if !wc_supports_sessions => {
-                            return Err(ErrorKind::ArgumentError {
-                                message: "Cannot use ClientSessions with unacknowledged write \
-                                          concern"
-                                    .to_string(),
-                            }
-                            .into())
-                        }
-                        Some(explicit_session) => {
-                            session = Some(explicit_session);
-                        },
-                        None if wc_supports_sessions => {
-                            let timeout = std::cmp::min(server_timeout, logical_session_timeout);
-                            implicit_session = Some(self.start_session_with_timeout(timeout).await);
-                            session = Some(implicit_session.as_mut().unwrap());
-                        },
-                        None => {}
-                    }
-                }
-            }
-        }
+        // if let Some(explicit_session) = explicit_session {
+        //     if !op.supports_sessions() {
+        //         return Err(ErrorKind::ArgumentError {
+        //             message: format!("{} does not support sessions", cmd.name)
+        //         }.into())
+        //     }
+                    
+        //     if !wc_supports_sessions {
+        //         return Err(ErrorKind::ArgumentError {
+        //             message: "Cannot use ClientSessions with unacknowledged write \
+        //                       concern"
+        //                 .to_string(),
+        //         }.into())
+        //     }
+
+        //     session = Some(explicit_session);
+        // } else {
+        //     let status = self.get_session_support_status().await?;
+        //     match status {
+        //         SessionSupportStatus::Supported {
+        //             logical_session_timeout,
+        //         } if op.supports_sessions() && wc_supports_sessions => {
+        //             implicit_session = Some(self.start_session_with_timeout(logical_session_timeout).await);
+        //             session = Some(implicit_session.as_mut().unwrap());
+        //         },
+        //         _ => {}
+        //     }
+        // }
+
+        // if op.supports_sessions() {
+        //     if let SessionSupportStatus::Supported {
+        //         logical_session_timeout,
+        //     } = self.get_session_support_status().await?
+        //     {
+        //         // We also verify that the server we're sending the command to supports sessions
+        //         // just in case its monitor hasn't updated the topology description
+        //         // yet.
+        //         if let Some(server_timeout) = stream_description.logical_session_timeout {
+        //             // sessions cannot be used with unacknowledged writes.
+        //             let wc_supports_sessions =
+        //                 op.write_concern().map(WriteConcern::is_acknowledged) != Some(false);
+
+        //             match op.session() {
+        //                 Some(_) if !wc_supports_sessions => {
+        //                     return Err(ErrorKind::ArgumentError {
+        //                         message: "Cannot use ClientSessions with unacknowledged write \
+        //                                   concern"
+        //                             .to_string(),
+        //                     }
+        //                     .into())
+        //                 }
+        //                 Some(explicit_session) => {
+        //                     session = Some(explicit_session);
+        //                 }
+        //                 None if wc_supports_sessions => {
+        //                     let timeout = std::cmp::min(server_timeout, logical_session_timeout);
+        //                     implicit_session = Some(self.start_session_with_timeout(timeout).await);
+        //                     session = Some(implicit_session.as_mut().unwrap());
+        //                 }
+        //                 None => {}
+        //             }
+        //         }
+        //     }
+        // }
 
         if let Some(ref session) = session {
             cmd.set_session(session);
         }
-        
+
         let session_cluster_time = session.as_ref().and_then(|session| session.cluster_time());
         let client_cluster_time = self.inner.cluster_time.read().await;
         let max_cluster_time = std::cmp::max(session_cluster_time, client_cluster_time.as_ref());
@@ -210,15 +299,27 @@ impl Client {
                 });
                 if let Some(cluster_time) = response.cluster_time() {
                     self.update_cluster_time(cluster_time).await;
-                    if let Some(ref mut session) = session {
+                    if let Some(session) = session {
                         session.advance_cluster_time(cluster_time.clone())
                     }
                 }
-                op.handle_response(response, OperationContext { implicit_session })
+                op.handle_response(response)
             }
         }
     }
 
+    /// Start an implicit session if the operation and write concern are compatible with sesssions.
+    async fn start_implicit_session<T: Operation>(&self, op: &T) -> Result<Option<ClientSession>> {
+        match self.get_session_support_status().await? {
+            SessionSupportStatus::Supported {
+                logical_session_timeout,
+            } if op.supports_sessions() && op.is_acknowledged() => {
+                Ok(Some(self.start_session_with_timeout(logical_session_timeout).await))
+            },
+            _ => Ok(None),
+        }
+    }
+    
     async fn get_session_support_status(&self) -> Result<SessionSupportStatus> {
         let initial_status = self.inner.topology.session_support_status().await;
 

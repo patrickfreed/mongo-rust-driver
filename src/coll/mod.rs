@@ -10,6 +10,7 @@ use serde::{de::Error, Deserialize, Deserializer};
 use self::options::*;
 use crate::{
     bson_util,
+    client::ClientSession,
     concern::{ReadConcern, WriteConcern},
     error::{convert_bulk_errors, BulkWriteError, BulkWriteFailure, ErrorKind, Result},
     operation::{
@@ -21,14 +22,14 @@ use crate::{
         Find,
         FindAndModify,
         Insert,
-        Update,
         Operation,
+        Update,
     },
     results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult},
     selection_criteria::SelectionCriteria,
     Client,
     Cursor,
-    Database, client::ClientSession,
+    Database,
 };
 
 /// Maximum size in bytes of an insert batch.
@@ -175,9 +176,9 @@ impl Collection {
         let aggregate = Aggregate::new(self.namespace(), pipeline, options);
         let client = self.client();
         client
-            .execute_operation(aggregate)
+            .execute_operation_with_implicit_sesssion(aggregate)
             .await
-            .map(|spec| Cursor::new(client.clone(), spec))
+            .map(|(spec, session)| Cursor::new(client.clone(), spec, session))
     }
 
     /// Estimates the number of documents in the collection using collection metadata.
@@ -321,10 +322,13 @@ impl Collection {
     ) -> Result<Cursor> {
         let find = Find::new(self.namespace(), filter.into(), options.into());
         let client = self.client();
+
         client
-            .execute_operation(find)
+            .execute_operation_with_implicit_sesssion(find)
             .await
-            .map(|spec| Cursor::new(client.clone(), spec))
+            .map(|(result, session)| {
+                Cursor::new(client.clone(), result, session)
+            })
     }
 
     /// Finds a single document in the collection matching `filter`.

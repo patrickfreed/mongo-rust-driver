@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::Result,
-    operation::{Operation, OperationContext},
+    operation::{Operation},
     selection_criteria::{ReadPreference, SelectionCriteria},
 };
 
@@ -55,7 +55,7 @@ impl Operation for ListDatabases {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         response.body::<ResponseBody>().map(|body| body.databases)
     }

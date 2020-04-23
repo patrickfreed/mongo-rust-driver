@@ -7,40 +7,32 @@ use bson::{doc, Document};
 use serde::Deserialize;
 
 use crate::{
+    client::ClientSession,
     cmap::{Command, CommandResponse, StreamDescription},
     error::{ErrorKind, Result},
-    operation::{Operation, OperationContext},
+    operation::Operation,
     options::{SelectionCriteria, StreamAddress},
     results::GetMoreResult,
-    Namespace, client::ClientSession,
+    Namespace, cursor::CursorSpecification,
 };
 
-#[derive(Clone, Debug)]
-pub(crate) struct GetMore<'a> {
+#[derive(Debug)]
+pub(crate) struct GetMore {
     ns: Namespace,
     cursor_id: i64,
     selection_criteria: SelectionCriteria,
     batch_size: Option<u32>,
     max_time: Option<Duration>,
-    session: Option<&'a mut ClientSession>,
 }
 
-impl<'a> GetMore<'a> {
-    pub(crate) fn new(
-        ns: Namespace,
-        cursor_id: i64,
-        address: StreamAddress,
-        batch_size: Option<u32>,
-        max_time: Option<Duration>,
-        session: Option<&'a mut ClientSession>,
-    ) -> Self {
+impl GetMore {
+    pub(crate) fn new(spec: CursorSpecification) -> Self {
         Self {
-            ns,
-            cursor_id,
-            selection_criteria: SelectionCriteria::from_address(address),
-            batch_size,
-            max_time,
-            session,
+            ns: spec.ns,
+            cursor_id: spec.id,
+            selection_criteria: SelectionCriteria::from_address(spec.address),
+            batch_size: spec.batch_size,
+            max_time: spec.max_time,
         }
     }
 
@@ -53,7 +45,7 @@ impl<'a> GetMore<'a> {
     }
 }
 
-impl<'a> Operation for GetMore<'a> {
+impl Operation for GetMore {
     type O = GetMoreResult;
     const NAME: &'static str = "getMore";
 
@@ -88,7 +80,6 @@ impl<'a> Operation for GetMore<'a> {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
     ) -> Result<Self::O> {
         let body: GetMoreResponseBody = response.body()?;
         Ok(GetMoreResult {
@@ -99,10 +90,6 @@ impl<'a> Operation for GetMore<'a> {
 
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
         Some(&self.selection_criteria)
-    }
-
-    fn session(&mut self) -> Option<&mut ClientSession> {
-        self.session
     }
 }
 

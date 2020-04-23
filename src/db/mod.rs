@@ -164,9 +164,9 @@ impl Database {
             options.into(),
         );
         self.client()
-            .execute_operation(list_collections)
+            .execute_operation_with_implicit_sesssion(list_collections)
             .await
-            .map(|spec| Cursor::new(self.client().clone(), spec))
+            .map(|(spec, session)| Cursor::new(self.client().clone(), spec, session))
     }
 
     /// Gets the names of the collections in the database.
@@ -178,9 +178,9 @@ impl Database {
             ListCollections::new(self.name().to_string(), filter.into(), true, None);
         let cursor = self
             .client()
-            .execute_operation(list_collections)
+            .execute_operation_with_implicit_sesssion(list_collections)
             .await
-            .map(|spec| Cursor::new(self.client().clone(), spec))?;
+            .map(|(spec, session)| Cursor::new(self.client().clone(), spec, session))?;
 
         cursor
             .and_then(|doc| match doc.get("name").and_then(Bson::as_str) {
@@ -252,8 +252,8 @@ impl Database {
         let aggregate = Aggregate::new(self.name().to_string(), pipeline, options);
         let client = self.client();
         client
-            .execute_operation(aggregate)
+            .execute_operation_with_implicit_sesssion(aggregate)
             .await
-            .map(|spec| Cursor::new(client.clone(), spec))
+            .map(|(spec, session)| Cursor::new(client.clone(), spec, session))
     }
 }

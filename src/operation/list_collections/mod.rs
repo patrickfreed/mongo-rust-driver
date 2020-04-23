@@ -7,7 +7,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     cursor::CursorSpecification,
     error::Result,
-    operation::{append_options, CursorBody, Operation, OperationContext},
+    operation::{append_options, CursorBody, Operation},
     options::{ListCollectionsOptions, ReadPreference, SelectionCriteria},
 };
 
@@ -67,7 +67,7 @@ impl Operation for ListCollections {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 

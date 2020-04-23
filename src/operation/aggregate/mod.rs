@@ -8,7 +8,7 @@ use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     cursor::CursorSpecification,
     error::Result,
-    operation::{append_options, CursorBody, Operation, OperationContext, WriteConcernOnlyBody},
+    operation::{append_options, CursorBody, Operation, WriteConcernOnlyBody},
     options::{AggregateOptions, SelectionCriteria, WriteConcern},
     Namespace,
 };
@@ -66,8 +66,7 @@ impl Operation for Aggregate {
 
     fn handle_response(
         &self,
-        response: CommandResponse,
-        context: OperationContext,
+        response: CommandResponse
     ) -> Result<Self::O> {
         let body: CursorBody = response.body()?;
 
@@ -93,7 +92,9 @@ impl Operation for Aggregate {
     }
 
     fn write_concern(&self) -> Option<&WriteConcern> {
-        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
+        self.options
+            .as_ref()
+            .and_then(|options| options.write_concern.as_ref())
     }
 }
 

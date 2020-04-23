@@ -6,8 +6,8 @@ use bson::doc;
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
     error::Result,
-    operation::{append_options, Operation, OperationContext, WriteConcernOnlyBody},
-    options::{WriteConcern, DropDatabaseOptions},
+    operation::{append_options, Operation,  WriteConcernOnlyBody},
+    options::{DropDatabaseOptions, WriteConcern},
 };
 
 #[derive(Debug)]
@@ -48,12 +48,14 @@ impl Operation for DropDatabase {
     fn handle_response(
         &self,
         response: CommandResponse,
-        context: OperationContext,
+        
     ) -> Result<Self::O> {
         response.body::<WriteConcernOnlyBody>()?.validate()
     }
 
     fn write_concern(&self) -> Option<&WriteConcern> {
-        self.options.as_ref().and_then(|options| options.write_concern.as_ref())
+        self.options
+            .as_ref()
+            .and_then(|options| options.write_concern.as_ref())
     }
 }
