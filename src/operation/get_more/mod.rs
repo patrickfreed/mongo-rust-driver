@@ -13,7 +13,7 @@ use crate::{
     operation::Operation,
     options::SelectionCriteria,
     results::GetMoreResult,
-    Namespace,
+    Namespace, cursor::CursorInformation,
 };
 
 #[derive(Debug)]
@@ -26,13 +26,13 @@ pub(crate) struct GetMore {
 }
 
 impl GetMore {
-    pub(crate) fn new(spec: CursorSpecification) -> Self {
+    pub(crate) fn new(info: CursorInformation) -> Self {
         Self {
-            ns: spec.ns,
-            cursor_id: spec.id,
-            selection_criteria: SelectionCriteria::from_address(spec.address),
-            batch_size: spec.batch_size,
-            max_time: spec.max_time,
+            ns: info.ns,
+            cursor_id: info.id,
+            selection_criteria: SelectionCriteria::from_address(info.address),
+            batch_size: info.batch_size,
+            max_time: info.max_time,
         }
     }
 }

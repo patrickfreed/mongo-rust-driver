@@ -1,4 +1,7 @@
 mod common;
+// TODO: RUST-52 use this
+#[allow(dead_code)]
+mod session;
 
 use std::{
     pin::Pin,
@@ -10,13 +13,13 @@ use futures::{future::BoxFuture, Stream};
 
 use crate::{
     client::ClientSession,
-    cursor::CursorSpecification,
     error::Result,
     operation::GetMore,
     results::GetMoreResult,
     Client,
 };
 use common::{GenericCursor, GetMoreProvider, GetMoreProviderResult};
+pub(crate) use common::{CursorSpecification, CursorInformation};
 
 pub struct Cursor {
     wrapped_cursor: GenericCursor<ImplicitSessionGetMoreProvider>,
@@ -79,11 +82,11 @@ impl GetMoreProvider for ImplicitSessionGetMoreProvider {
         *self = Self::Idle(result.session)
     }
 
-    fn start_execution(&mut self, spec: CursorSpecification, client: Client) {
+    fn start_execution(&mut self, info: CursorInformation, client: Client) {
         take_mut::take(self, |self_| match self_ {
             Self::Idle(mut session) => {
                 let future = Box::pin(async move {
-                    let get_more = GetMore::new(spec);
+                    let get_more = GetMore::new(info);
                     let get_more_result = client
                         .execute_operation_with_session(get_more, &mut session)
                         .await;
