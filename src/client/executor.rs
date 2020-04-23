@@ -100,10 +100,10 @@ impl Client {
 
     /// Checks out a connection and executes the given operation, using the provided session
     /// if present.
-    async fn get_connection_and_execute_operation<'session, T: Operation>(
+    async fn get_connection_and_execute_operation<T: Operation>(
         &self,
         op: T,
-        session: Option<&'session mut ClientSession>,
+        session: Option<&mut ClientSession>,
     ) -> Result<T::O> {
         let server = self.select_server(op.selection_criteria()).await?;
 
@@ -134,11 +134,11 @@ impl Client {
     }
 
     /// Executes an operation on a given connection, using the provided session if present.
-    async fn execute_operation_on_connection<'session, T: Operation>(
+    async fn execute_operation_on_connection<T: Operation>(
         &self,
         op: T,
         connection: &mut Connection,
-        session: Option<&'session mut ClientSession>,
+        session: Option<&mut ClientSession>,
     ) -> Result<T::O> {
         let stream_description: StreamDescription = connection.stream_description()?.clone();
 

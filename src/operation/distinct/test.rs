@@ -6,7 +6,7 @@ use crate::{
     cmap::{CommandResponse, StreamDescription},
     coll::{options::DistinctOptions, Namespace},
     error::ErrorKind,
-    operation::{test, Distinct, Operation, OperationContext},
+    operation::{test, Distinct, Operation},
 };
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -110,7 +110,7 @@ async fn handle_success() {
     });
 
     let actual_values = distinct_op
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("supposed to succeed");
 
     assert_eq!(actual_values, expected_values);
@@ -129,7 +129,7 @@ async fn handle_response_with_empty_values() {
     let expected_values: Vec<Bson> = Vec::new();
 
     let actual_values = distinct_op
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("supposed to succeed");
 
     assert_eq!(actual_values, expected_values);
@@ -144,7 +144,7 @@ async fn handle_response_no_values() {
        "ok" : 1
     });
 
-    let result = distinct_op.handle_response(response, OperationContext::default());
+    let result = distinct_op.handle_response(response);
     match result.as_ref().map_err(|e| e.as_ref()) {
         Err(ErrorKind::ResponseError { .. }) => {}
         other => panic!("expected response error, but got {:?}", other),

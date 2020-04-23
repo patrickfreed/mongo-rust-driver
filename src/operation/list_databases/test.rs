@@ -4,7 +4,7 @@ use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
     error::ErrorKind,
-    operation::{ListDatabases, Operation, OperationContext},
+    operation::{ListDatabases, Operation},
     selection_criteria::ReadPreference,
 };
 
@@ -101,7 +101,7 @@ async fn handle_success() {
     });
 
     let actual_values = list_databases_op
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("supposed to succeed");
 
     assert_eq!(actual_values, expected_values);
@@ -116,7 +116,7 @@ async fn handle_response_no_databases() {
        "ok" : 1
     });
 
-    let result = list_databases_op.handle_response(response, OperationContext::default());
+    let result = list_databases_op.handle_response(response);
     match result.as_ref().map_err(|e| e.as_ref()) {
         Err(ErrorKind::ResponseError { .. }) => {}
         other => panic!("expected response error, but got {:?}", other),

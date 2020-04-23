@@ -4,7 +4,7 @@ use crate::{
     cmap::{CommandResponse, StreamDescription},
     concern::WriteConcern,
     error::{ErrorKind, WriteFailure},
-    operation::{Create, Operation, OperationContext},
+    operation::{Create, Operation},
     options::{CreateCollectionOptions, ValidationAction, ValidationLevel},
     Namespace,
 };
@@ -51,13 +51,9 @@ async fn handle_success() {
     let op = Create::empty();
 
     let ok_response = CommandResponse::with_document(doc! { "ok": 1.0 });
-    assert!(op
-        .handle_response(ok_response, OperationContext::default())
-        .is_ok());
+    assert!(op.handle_response(ok_response).is_ok());
     let ok_extra = CommandResponse::with_document(doc! { "ok": 1.0, "hello": "world" });
-    assert!(op
-        .handle_response(ok_extra, OperationContext::default())
-        .is_ok());
+    assert!(op.handle_response(ok_extra).is_ok());
 }
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test)]
@@ -74,7 +70,7 @@ async fn handle_write_concern_error() {
         "ok": 1
     });
 
-    let result = op.handle_response(response, OperationContext::default());
+    let result = op.handle_response(response);
     assert!(result.is_err());
 
     match *result.unwrap_err().kind {

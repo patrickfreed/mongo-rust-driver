@@ -96,7 +96,7 @@ impl TopologyDescription {
             max_set_version: None,
             max_election_id: None,
             compatibility_error: None,
-            logical_session_timeout_minutes: None,
+            session_support_status: Default::default(),
             local_threshold: None,
             heartbeat_freq: None,
             servers: hosts

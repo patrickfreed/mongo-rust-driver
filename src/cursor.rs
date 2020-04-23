@@ -232,7 +232,7 @@ impl Drop for SessionCursor {
 
         let namespace = self.spec.ns.clone();
         let client = self.client.clone();
-        let cursor_id = self.spec.id.clone();
+        let cursor_id = self.spec.id;
 
         RUNTIME.execute(async move {
             let _: Result<_> = client

@@ -5,7 +5,7 @@ use bson::{doc, Document};
 use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
-    operation::{test, Find, Operation, OperationContext},
+    operation::{test, Find, Operation},
     options::{CursorType, FindOptions, Hint, ReadConcern, StreamAddress},
     Namespace,
 };
@@ -219,10 +219,10 @@ async fn handle_success() {
         "ok": 1.0
     };
 
-    let result = find.handle_response(
-        CommandResponse::with_document_and_address(address.clone(), response.clone()),
-        OperationContext::default(),
-    );
+    let result = find.handle_response(CommandResponse::with_document_and_address(
+        address.clone(),
+        response.clone(),
+    ));
     assert!(result.is_ok());
 
     let cursor_spec = result.unwrap();
@@ -239,10 +239,10 @@ async fn handle_success() {
         None,
         Some(FindOptions::builder().batch_size(123).build()),
     );
-    let result = find.handle_response(
-        CommandResponse::with_document_and_address(address.clone(), response),
-        OperationContext::default(),
-    );
+    let result = find.handle_response(CommandResponse::with_document_and_address(
+        address.clone(),
+        response,
+    ));
     assert!(result.is_ok());
 
     let cursor_spec = result.unwrap();
@@ -284,7 +284,7 @@ fn verify_max_await_time(max_await_time: Option<Duration>, cursor_type: Option<C
     );
 
     let spec = find
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("should handle correctly");
     assert_eq!(spec.max_time, max_await_time);
 }
@@ -312,10 +312,7 @@ async fn handle_invalid_response() {
 
     let garbled = doc! { "asdfasf": "ASdfasdf" };
     assert!(find
-        .handle_response(
-            CommandResponse::with_document(garbled),
-            OperationContext::default()
-        )
+        .handle_response(CommandResponse::with_document(garbled))
         .is_err());
 
     let missing_cursor_field = doc! {
@@ -325,9 +322,6 @@ async fn handle_invalid_response() {
         }
     };
     assert!(find
-        .handle_response(
-            CommandResponse::with_document(missing_cursor_field),
-            OperationContext::default()
-        )
+        .handle_response(CommandResponse::with_document(missing_cursor_field))
         .is_err());
 }

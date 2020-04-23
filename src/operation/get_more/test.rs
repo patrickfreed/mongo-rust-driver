@@ -5,7 +5,8 @@ use bson::{doc, Document};
 use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
-    operation::{GetMore, Operation, OperationContext},
+    cursor::CursorSpecification,
+    operation::{GetMore, Operation},
     options::StreamAddress,
     sdam::{ServerDescription, ServerInfo, ServerType},
     Namespace,
@@ -19,7 +20,15 @@ fn build_test(
     max_time: Option<Duration>,
     mut expected_body: Document,
 ) {
-    let get_more = GetMore::new(ns.clone(), cursor_id, address, batch_size, max_time);
+    let spec = CursorSpecification {
+        ns: ns.clone(),
+        id: cursor_id,
+        address,
+        batch_size,
+        max_time,
+        buffer: Default::default(),
+    };
+    let get_more = GetMore::new(spec);
 
     let build_result = get_more.build(&StreamDescription::new_testing());
     assert!(build_result.is_ok());
@@ -104,13 +113,15 @@ async fn build_batch_size() {
         },
     );
 
-    let op = GetMore::new(
-        Namespace::empty(),
-        cursor_id,
+    let spec = CursorSpecification {
+        ns: Namespace::empty(),
+        id: cursor_id,
         address,
-        Some((std::i32::MAX as u32) + 1),
-        None,
-    );
+        batch_size: Some((std::i32::MAX as u32) + 1),
+        max_time: None,
+        buffer: Default::default(),
+    };
+    let op = GetMore::new(spec);
     assert!(op.build(&StreamDescription::new_testing()).is_err())
 }
 
@@ -122,7 +133,15 @@ async fn op_selection_criteria() {
         port: Some(1234),
     };
 
-    let get_more = GetMore::new(Namespace::empty(), 123, address.clone(), None, None);
+    let spec = CursorSpecification {
+        ns: Namespace::empty(),
+        id: 123,
+        address: address.clone(),
+        batch_size: None,
+        max_time: None,
+        buffer: Default::default(),
+    };
+    let get_more = GetMore::new(spec);
     let server_description = ServerDescription {
         address,
         server_type: ServerType::Unknown,
@@ -160,7 +179,15 @@ async fn handle_success() {
         port: Some(1234),
     };
 
-    let get_more = GetMore::new(ns, cursor_id, address, None, None);
+    let spec = CursorSpecification {
+        ns,
+        id: cursor_id,
+        address,
+        batch_size: None,
+        max_time: None,
+        buffer: Default::default(),
+    };
+    let get_more = GetMore::new(spec);
 
     let batch = vec![doc! { "_id": 1 }, doc! { "_id": 2 }, doc! { "_id": 3 }];
 
@@ -174,7 +201,7 @@ async fn handle_success() {
     });
 
     let result = get_more
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("handle success case failed");
     assert!(!result.exhausted);
     assert_eq!(result.batch, batch);
@@ -188,7 +215,7 @@ async fn handle_success() {
         "ok": 1
     });
     let result = get_more
-        .handle_response(response, OperationContext::default())
+        .handle_response(response)
         .expect("handle success case failed");
     assert!(result.exhausted);
     assert_eq!(result.batch, batch);
