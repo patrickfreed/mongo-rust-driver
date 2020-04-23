@@ -1,8 +1,15 @@
-use crate::{results::GetMoreResult, error::Result, client::ClientSession, Client, cursor::CursorSpecification, operation::GetMore};
-use std::collections::VecDeque;
+use super::common::{CursorInformation, GenericCursor, GetMoreProvider, GetMoreProviderResult};
+use crate::{
+    client::ClientSession,
+    cursor::CursorSpecification,
+    error::Result,
+    operation::GetMore,
+    results::GetMoreResult,
+    Client,
+};
 use bson::Document;
-use super::common::{GetMoreProvider, GenericCursor, GetMoreProviderResult, CursorInformation};
 use futures::future::BoxFuture;
+use std::collections::VecDeque;
 
 /// A cursor that was started with a session and must be iterated using one.
 #[derive(Debug)]
@@ -25,18 +32,21 @@ impl SessionCursor {
         }
     }
 
-    fn with_session<'session>(&mut self, session: &'session mut ClientSession) -> SessionCursorHandle<'_, 'session> {
+    fn with_session<'session>(
+        &mut self,
+        session: &'session mut ClientSession,
+    ) -> SessionCursorHandle<'_, 'session> {
         let get_more_provider = ExplicitSessionGetMoreProvider::new(session);
 
         // Pass the buffer into this cursor handle for iteration.
         // It will be returned in the handle's `Drop` implementation.
         let spec = CursorSpecification {
             info: self.info.clone(),
-            initial_buffer: std::mem::take(&mut self.buffer)
+            initial_buffer: std::mem::take(&mut self.buffer),
         };
         SessionCursorHandle {
             generic_cursor: GenericCursor::new(self.client.clone(), spec, get_more_provider),
-            session_cursor: self
+            session_cursor: self,
         }
     }
 }
@@ -64,9 +74,9 @@ enum ExplicitSessionGetMoreProvider<'session> {
 
     /// No future is being executed.
     ///
-    /// This variant needs a `MutableSessionReference` struct that can be moved in order to transition
-    /// to `Executing` via `take_mut`.
-    Idle(MutableSessionReference<'session>)
+    /// This variant needs a `MutableSessionReference` struct that can be moved in order to
+    /// transition to `Executing` via `take_mut`.
+    Idle(MutableSessionReference<'session>),
 }
 
 impl<'session> ExplicitSessionGetMoreProvider<'session> {
@@ -87,7 +97,9 @@ impl<'session> GetMoreProvider for ExplicitSessionGetMoreProvider<'session> {
     }
 
     fn clear_execution(&mut self, result: Self::GetMoreResult) {
-        *self = Self::Idle(MutableSessionReference { reference: result.session })
+        *self = Self::Idle(MutableSessionReference {
+            reference: result.session,
+        })
     }
 
     fn start_execution(&mut self, info: CursorInformation, client: Client) {
@@ -95,10 +107,12 @@ impl<'session> GetMoreProvider for ExplicitSessionGetMoreProvider<'session> {
             if let ExplicitSessionGetMoreProvider::Idle(session) = self_ {
                 let future = Box::pin(async move {
                     let get_more = GetMore::new(info);
-                    let get_more_result = client.execute_operation_with_session(get_more, session.reference).await;
+                    let get_more_result = client
+                        .execute_operation_with_session(get_more, session.reference)
+                        .await;
                     ExecutionResult {
                         get_more_result,
-                        session: session.reference
+                        session: session.reference,
                     }
                 });
                 return ExplicitSessionGetMoreProvider::Executing(future);
@@ -116,11 +130,13 @@ struct ExecutionResult<'session> {
 }
 
 impl<'session> GetMoreProviderResult for ExecutionResult<'session> {
-    fn get_more_result(&self) -> Result<GetMoreResult> { unimplemented!() }
+    fn get_more_result(&self) -> Result<GetMoreResult> {
+        unimplemented!()
+    }
 }
-    
+
 /// Wrapper around a mutable reference to a `ClientSession` that provides move semantics.
-/// This is required 
+/// This is required
 struct MutableSessionReference<'a> {
-    reference: &'a mut ClientSession
+    reference: &'a mut ClientSession,
 }

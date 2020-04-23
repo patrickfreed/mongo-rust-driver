@@ -18,8 +18,8 @@ use crate::{
     results::GetMoreResult,
     Client,
 };
+pub(crate) use common::{CursorInformation, CursorSpecification};
 use common::{GenericCursor, GetMoreProvider, GetMoreProviderResult};
-pub(crate) use common::{CursorSpecification, CursorInformation};
 
 /// A `Cursor` streams the result of a query. When a query is made, a `Cursor` will be returned with
 /// the first batch of results from the server; the documents will be returned as the `Cursor` is
@@ -77,6 +77,7 @@ pub(crate) use common::{CursorSpecification, CursorInformation};
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Cursor {
     wrapped_cursor: GenericCursor<ImplicitSessionGetMoreProvider>,
 }

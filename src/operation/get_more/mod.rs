@@ -8,11 +8,12 @@ use serde::Deserialize;
 
 use crate::{
     cmap::{Command, CommandResponse, StreamDescription},
+    cursor::CursorInformation,
     error::{ErrorKind, Result},
     operation::Operation,
     options::SelectionCriteria,
     results::GetMoreResult,
-    Namespace, cursor::CursorInformation,
+    Namespace,
 };
 
 #[derive(Debug)]

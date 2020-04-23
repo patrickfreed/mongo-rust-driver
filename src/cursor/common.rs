@@ -1,14 +1,21 @@
-use crate::{error::Result, results::GetMoreResult, Client, Namespace, options::StreamAddress};
-use bson::Document;
-use futures::{Future, Stream};
 use std::{
     collections::VecDeque,
     pin::Pin,
-    task::{Context, Poll}, time::Duration,
+    task::{Context, Poll},
+    time::Duration,
 };
 
+use bson::Document;
+use derivative::Derivative;
+use futures::{Future, Stream};
+
+use crate::{error::Result, options::StreamAddress, results::GetMoreResult, Client, Namespace};
+
 /// An internal cursor that can be used in a variety of contexts depending on its `GetMoreProvider`.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(super) struct GenericCursor<T: GetMoreProvider> {
+    #[derivative(Debug = "ignore")]
     provider: T,
     client: Client,
     info: CursorInformation,
@@ -25,7 +32,7 @@ impl<T: GetMoreProvider> GenericCursor<T> {
             client,
             provider: get_more_provider,
             buffer: spec.initial_buffer,
-            info: spec.info
+            info: spec.info,
         }
     }
 
@@ -75,7 +82,8 @@ impl<T: GetMoreProvider> Stream for GenericCursor<T> {
     }
 }
 
-/// A trait implemented by objects that can provide batches of documents to a cursor via the getMore command.
+/// A trait implemented by objects that can provide batches of documents to a cursor via the getMore
+/// command.
 pub(super) trait GetMoreProvider: Unpin {
     /// The result type that the future running the getMore evaluates to.
     type GetMoreResult: GetMoreProviderResult;
@@ -99,7 +107,6 @@ pub(super) trait GetMoreProviderResult {
     fn get_more_result(&self) -> Result<GetMoreResult>;
 }
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct CursorSpecification {
     pub(crate) info: CursorInformation,
@@ -113,18 +120,20 @@ impl CursorSpecification {
         id: i64,
         batch_size: impl Into<Option<u32>>,
         max_time: impl Into<Option<Duration>>,
-        initial_buffer: VecDeque<Document>
+        initial_buffer: VecDeque<Document>,
     ) -> Self {
         Self {
-            info: CursorInformation { ns, id, address, batch_size: batch_size.into(), max_time: max_time.into() },
-            initial_buffer
+            info: CursorInformation {
+                ns,
+                id,
+                address,
+                batch_size: batch_size.into(),
+                max_time: max_time.into(),
+            },
+            initial_buffer,
         }
     }
 
-    pub(crate) fn namespace(&self) -> &Namespace {
-        &self.info.ns
-    }
-    
     pub(crate) fn id(&self) -> i64 {
         self.info.id
     }
@@ -142,11 +151,6 @@ impl CursorSpecification {
     #[cfg(test)]
     pub(crate) fn max_time(&self) -> Option<Duration> {
         self.info.max_time
-    }
-
-    #[cfg(test)]
-    pub(crate) fn initial_buffer(&self) -> &VecDeque<Document> {
-        &self.info.initial_buffer
     }
 }
 

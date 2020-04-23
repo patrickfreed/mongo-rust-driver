@@ -5,7 +5,7 @@ use bson::{doc, Document};
 use crate::{
     bson_util,
     cmap::{CommandResponse, StreamDescription},
-    cursor::CursorSpecification,
+    cursor::CursorInformation,
     operation::{GetMore, Operation},
     options::StreamAddress,
     sdam::{ServerDescription, ServerInfo, ServerType},
@@ -20,15 +20,14 @@ fn build_test(
     max_time: Option<Duration>,
     mut expected_body: Document,
 ) {
-    let spec = CursorSpecification {
+    let info = CursorInformation {
         ns: ns.clone(),
         id: cursor_id,
         address,
         batch_size,
         max_time,
-        buffer: Default::default(),
     };
-    let get_more = GetMore::new(spec);
+    let get_more = GetMore::new(info);
 
     let build_result = get_more.build(&StreamDescription::new_testing());
     assert!(build_result.is_ok());
@@ -113,15 +112,14 @@ async fn build_batch_size() {
         },
     );
 
-    let spec = CursorSpecification {
+    let info = CursorInformation {
         ns: Namespace::empty(),
-        id: cursor_id,
         address,
+        id: cursor_id,
         batch_size: Some((std::i32::MAX as u32) + 1),
         max_time: None,
-        buffer: Default::default(),
     };
-    let op = GetMore::new(spec);
+    let op = GetMore::new(info);
     assert!(op.build(&StreamDescription::new_testing()).is_err())
 }
 
@@ -133,15 +131,14 @@ async fn op_selection_criteria() {
         port: Some(1234),
     };
 
-    let spec = CursorSpecification {
+    let info = CursorInformation {
         ns: Namespace::empty(),
-        id: 123,
         address: address.clone(),
+        id: 123,
         batch_size: None,
         max_time: None,
-        buffer: Default::default(),
     };
-    let get_more = GetMore::new(spec);
+    let get_more = GetMore::new(info);
     let server_description = ServerDescription {
         address,
         server_type: ServerType::Unknown,
@@ -179,15 +176,14 @@ async fn handle_success() {
         port: Some(1234),
     };
 
-    let spec = CursorSpecification {
+    let info = CursorInformation {
         ns,
-        id: cursor_id,
         address,
+        id: cursor_id,
         batch_size: None,
         max_time: None,
-        buffer: Default::default(),
     };
-    let get_more = GetMore::new(spec);
+    let get_more = GetMore::new(info);
 
     let batch = vec![doc! { "_id": 1 }, doc! { "_id": 2 }, doc! { "_id": 3 }];
 
