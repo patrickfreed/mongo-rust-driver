@@ -263,7 +263,7 @@ async fn handle_max_await_time() {
     let spec = aggregate
         .handle_response(response.clone())
         .expect("handle should succeed");
-    assert!(spec.max_time.is_none());
+    assert!(spec.max_time().is_none());
 
     let max_await = Duration::from_millis(123);
     let options = AggregateOptions::builder()

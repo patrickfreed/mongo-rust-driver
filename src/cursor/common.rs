@@ -121,8 +121,32 @@ impl CursorSpecification {
         }
     }
 
+    pub(crate) fn namespace(&self) -> &Namespace {
+        &self.info.ns
+    }
+    
     pub(crate) fn id(&self) -> i64 {
         self.info.id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn address(&self) -> &StreamAddress {
+        &self.info.address
+    }
+
+    #[cfg(test)]
+    pub(crate) fn batch_size(&self) -> Option<u32> {
+        self.info.batch_size
+    }
+
+    #[cfg(test)]
+    pub(crate) fn max_time(&self) -> Option<Duration> {
+        self.info.max_time
+    }
+
+    #[cfg(test)]
+    pub(crate) fn initial_buffer(&self) -> &VecDeque<Document> {
+        &self.info.initial_buffer
     }
 }
 
