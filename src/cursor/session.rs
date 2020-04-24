@@ -6,6 +6,7 @@ use crate::{
     operation::GetMore,
     results::GetMoreResult,
     Client,
+    RUNTIME,
 };
 use bson::Document;
 use futures::future::BoxFuture;
@@ -48,6 +49,18 @@ impl SessionCursor {
             generic_cursor: GenericCursor::new(self.client.clone(), spec, get_more_provider),
             session_cursor: self,
         }
+    }
+}
+
+impl Drop for SessionCursor {
+    fn drop(&mut self) {
+        let ns = &self.info.ns;
+        let coll = self
+            .client
+            .database(ns.db.as_str())
+            .collection(ns.coll.as_str());
+        let cursor_id = self.info.id;
+        RUNTIME.execute(async move { coll.kill_cursor(cursor_id).await });
     }
 }
 

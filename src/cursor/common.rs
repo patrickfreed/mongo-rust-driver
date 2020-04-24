@@ -43,6 +43,14 @@ impl<T: GetMoreProvider> GenericCursor<T> {
     pub(super) fn is_exhausted(&self) -> bool {
         self.exhausted
     }
+
+    pub(super) fn id(&self) -> i64 {
+        self.info.id
+    }
+
+    pub(super) fn namespace(&self) -> &Namespace {
+        &self.info.ns
+    }
 }
 
 impl<T: GetMoreProvider> Stream for GenericCursor<T> {

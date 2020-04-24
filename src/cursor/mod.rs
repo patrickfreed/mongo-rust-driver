@@ -17,6 +17,7 @@ use crate::{
     operation::GetMore,
     results::GetMoreResult,
     Client,
+    RUNTIME,
 };
 pub(crate) use common::{CursorInformation, CursorSpecification};
 use common::{GenericCursor, GetMoreProvider, GetMoreProviderResult};
@@ -79,6 +80,7 @@ use common::{GenericCursor, GetMoreProvider, GetMoreProviderResult};
 /// ```
 #[derive(Debug)]
 pub struct Cursor {
+    client: Client,
     wrapped_cursor: GenericCursor<ImplicitSessionGetMoreProvider>,
 }
 
@@ -86,6 +88,7 @@ impl Cursor {
     #[allow(dead_code)]
     pub(crate) fn new(client: Client, spec: CursorSpecification, session: ClientSession) -> Self {
         Self {
+            client: client.clone(),
             wrapped_cursor: GenericCursor::new(
                 client,
                 spec,
@@ -100,6 +103,18 @@ impl Stream for Cursor {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.wrapped_cursor).poll_next(cx)
+    }
+}
+
+impl Drop for Cursor {
+    fn drop(&mut self) {
+        let ns = self.wrapped_cursor.namespace();
+        let coll = self
+            .client
+            .database(ns.db.as_str())
+            .collection(ns.coll.as_str());
+        let cursor_id = self.wrapped_cursor.id();
+        RUNTIME.execute(async move { coll.kill_cursor(cursor_id).await });
     }
 }
 

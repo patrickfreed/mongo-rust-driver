@@ -556,6 +556,23 @@ impl Collection {
         let update = Update::new(self.namespace(), query, update.into(), false, options);
         self.client().execute_operation(update).await
     }
+
+    /// Kill the server side cursor that id corresponds to.
+    pub(super) async fn kill_cursor(&self, cursor_id: i64) -> Result<()> {
+        let ns = self.namespace();
+
+        self.client()
+            .database(ns.db.as_str())
+            .run_command(
+                doc! {
+                    "killCursors": ns.coll.as_str(),
+                    "cursors": [cursor_id]
+                },
+                None,
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 /// A struct modeling the canonical name for a collection in MongoDB.
