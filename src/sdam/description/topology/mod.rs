@@ -15,7 +15,7 @@ use crate::{
     error::{ErrorKind, Result},
     options::{ClientOptions, StreamAddress},
     sdam::description::server::{ServerDescription, ServerType},
-    selection_criteria::{ReadPreference, SelectionCriteria},
+    selection_criteria::{ReadPreference, SelectionCriteria}, client::ClusterTime,
 };
 
 const DEFAULT_HEARTBEAT_FREQUENCY: Duration = Duration::from_secs(10);
@@ -62,6 +62,9 @@ pub(crate) struct TopologyDescription {
     /// is for them.
     session_support_status: SessionSupportStatus,
 
+    /// The highest reported cluster time by any server in this topology.
+    cluster_time: Option<ClusterTime>,
+    
     /// The amount of latency beyond that of the suitable server with the minimum latency that is
     /// acceptable for a read operation.
     local_threshold: Option<Duration>,
@@ -81,6 +84,7 @@ impl PartialEq for TopologyDescription {
         self.compatibility_error == other.compatibility_error
             && self.servers == other.servers
             && self.topology_type == other.topology_type
+            && self.cluster_time == other.cluster_time
     }
 }
 
@@ -97,6 +101,7 @@ impl TopologyDescription {
             max_election_id: None,
             compatibility_error: None,
             session_support_status: Default::default(),
+            cluster_time: None,
             local_threshold: None,
             heartbeat_freq: None,
             servers: hosts
@@ -140,6 +145,7 @@ impl TopologyDescription {
             max_election_id: None,
             compatibility_error: None,
             session_support_status: SessionSupportStatus::Undetermined,
+            cluster_time: None,
             local_threshold: options.local_threshold,
             heartbeat_freq: options.heartbeat_freq,
             servers,
@@ -155,6 +161,10 @@ impl TopologyDescription {
         self.servers.keys()
     }
 
+    pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {
+        self.cluster_time.as_ref()
+    }
+    
     pub(crate) fn get_server_description(
         &self,
         address: &StreamAddress,
@@ -288,6 +298,7 @@ impl TopologyDescription {
                     };
                 }
                 SessionSupportStatus::Undetermined => {
+                    println!("transitioning from undetermined to supported");
                     self.session_support_status = SessionSupportStatus::Supported {
                         logical_session_timeout: timeout,
                     }
@@ -326,10 +337,21 @@ impl TopologyDescription {
             None if server_description.server_type.is_data_bearing()
                 || self.topology_type == TopologyType::Single =>
             {
+                println!("transitioning to unsupported");
                 self.session_support_status = SessionSupportStatus::Unsupported
             }
-            None => {}
+            None => { println!("not databearing, leaving alone"); }
         }
+    }
+
+    /// Sets the topology's cluster time to the provided one if it is higher than the currently recorded one.
+    pub(crate) fn update_cluster_time(&mut self, cluster_time: &ClusterTime) {
+        // println!("updating cluster time to {:?}", cluster_time);
+        if self.cluster_time.as_ref() > Some(cluster_time) {
+            // println!("not updating {:?} > {:?}", self.cluster_time.as_ref(), cluster_time);
+            return;
+        }
+        self.cluster_time = Some(cluster_time.clone());
     }
 
     /// Returns the diff between this topology description and the provided one, or `None` if
@@ -385,8 +407,16 @@ impl TopologyDescription {
             server_description.clone(),
         );
 
+        // Update the topology's min logicalSesssionTimeout
         self.update_session_support_status(&server_description);
 
+        // Update the topology's max reported $clusterTime.
+        if let Some(ref cluster_time) = server_description.cluster_time().ok().flatten() {
+            self.update_cluster_time(cluster_time);
+        } else {
+            println!("cluster time null");
+        }
+        
         // Update the topology description based on the current topology type.
         match self.topology_type {
             TopologyType::Single => {}

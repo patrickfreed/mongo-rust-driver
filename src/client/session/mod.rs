@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod test;
+
 use std::{
     collections::{HashSet, VecDeque},
     time::{Duration, Instant},
@@ -59,9 +62,9 @@ impl ClientSession {
 
     /// Set the cluster time to the provided one if it is greater than this session's highest seen
     /// cluster time or if this session's cluster time is `None`.
-    pub(crate) fn advance_cluster_time(&mut self, to: ClusterTime) {
-        if self.cluster_time().map(|ct| ct < &to).unwrap_or(true) {
-            self.cluster_time = Some(to);
+    pub(crate) fn advance_cluster_time(&mut self, to: &ClusterTime) {
+        if self.cluster_time().map(|ct| ct < to).unwrap_or(true) {
+            self.cluster_time = Some(to.clone());
         }
     }
 }
@@ -122,7 +125,8 @@ impl ServerSession {
 
     /// Determines if this server session is about to expire in a short amount of time (1 minute).
     fn is_about_to_expire(&self, logical_session_timeout: Duration) -> bool {
-        self.last_use + logical_session_timeout > Instant::now() - Duration::from_secs(60)
+        let expiration_date = self.last_use + logical_session_timeout;
+        expiration_date < Instant::now() + Duration::from_secs(60)
     }
 }
 
@@ -146,31 +150,40 @@ impl ServerSessionPool {
         while let Some(session) = pool.pop_front() {
             // If a session is about to expire within the next minute, remove it from pool.
             if session.is_about_to_expire(logical_session_timeout) {
+                println!("session is about to expire");
                 continue;
             }
             return session;
         }
+        println!("checking out new session");
         ServerSession::new()
     }
 
     /// Checks in a server session to the pool. If it is about to expire or is dirty, it will be
     /// discarded.
     pub(crate) async fn check_in(&self, session: ServerSession, logical_session_timeout: Duration) {
+        println!("checking in");
+
         let mut pool = self.pool.lock().await;
         while let Some(pooled_session) = pool.pop_back() {
             if session.is_about_to_expire(logical_session_timeout) {
+                println!("session is about to expire, dumping");
                 continue;
             }
+            pool.push_back(pooled_session);
             break;
         }
 
         if !session.dirty && !session.is_about_to_expire(logical_session_timeout) {
             pool.push_front(session);
+        } else {
+            println!("not returning to pool");
         }
     }
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ClusterTime {
     cluster_time: TimeStamp,
     signature: Document,

@@ -46,6 +46,7 @@ async fn run_test(test_file: TestFile) {
         max_election_id: None,
         compatibility_error: None,
         session_support_status: Default::default(),
+        cluster_time: None,
         local_threshold: None,
         heartbeat_freq: None,
         servers: {

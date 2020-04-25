@@ -189,6 +189,8 @@ impl Client {
                 .session_pool
                 .check_in(session, logical_session_timeout)
                 .await;
+        } else {
+            println!("not supported");
         }
     }
 
@@ -229,18 +231,6 @@ impl Client {
         )
     }
 
-    /// Sets the client's cluster time to the provided one if it is higher than the client's current
-    /// highest seen value.
-    async fn update_cluster_time(&self, cluster_time: &ClusterTime) {
-        let mut client_time_lock = self.inner.cluster_time.write().await;
-        if let Some(ref client_time) = *client_time_lock {
-            if client_time > cluster_time {
-                return;
-            }
-        }
-        *client_time_lock = Some(cluster_time.clone());
-    }
-
     /// Get the address of the server selected according to the given criteria.
     /// This method is only used in tests.
     #[cfg(test)]
@@ -277,6 +267,7 @@ impl Client {
                 return Ok(server);
             }
 
+            println!("couldnt select server requesting topology check");
             self.inner.topology.request_topology_check();
 
             let time_passed = start_time.to(PreciseTime::now());

@@ -89,6 +89,7 @@ async fn run_test(test_file: TestFile) {
                 Ok(IsMasterReply {
                     command_response,
                     round_trip_time: Some(Duration::from_millis(1234)), // Doesn't matter for tests.
+                    cluster_time: None,
                 })
             };
 

@@ -225,7 +225,7 @@ impl Client {
         }
 
         let session_cluster_time = session.as_ref().and_then(|session| session.cluster_time());
-        let client_cluster_time = self.inner.cluster_time.read().await;
+        let client_cluster_time = self.inner.topology.cluster_time().await;
         let max_cluster_time = std::cmp::max(session_cluster_time, client_cluster_time.as_ref());
         if let Some(cluster_time) = max_cluster_time {
             cmd.set_cluster_time(cluster_time);
@@ -301,9 +301,9 @@ impl Client {
                     handler.handle_command_succeeded_event(command_succeeded_event);
                 });
                 if let Some(cluster_time) = response.cluster_time() {
-                    self.update_cluster_time(cluster_time).await;
+                    self.inner.topology.update_cluster_time(cluster_time).await;
                     if let Some(session) = session {
-                        session.advance_cluster_time(cluster_time.clone())
+                        session.advance_cluster_time(cluster_time)
                     }
                 }
                 op.handle_response(response)

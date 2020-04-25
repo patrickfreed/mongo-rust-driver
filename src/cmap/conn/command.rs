@@ -56,10 +56,10 @@ impl Command {
         if let Ok(doc) = bson::to_bson(cluster_time) {
             self.body.insert(
                 "$clusterTime",
-                doc! {
-                    "clusterTime": doc,
-                },
+                doc,
             );
+        } else {
+            println!("error converting to bson");
         }
     }
 }

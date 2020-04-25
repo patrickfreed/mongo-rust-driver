@@ -53,6 +53,7 @@ impl TopologyDescription {
         // Although `suitable_servers` has to handle the Unknown case for testing, we skip calling
         // it here to avoid an allocation.
         if let TopologyType::Unknown = self.topology_type {
+            println!("topology unknown, returning none");
             return Ok(None);
         }
 
@@ -71,6 +72,10 @@ impl TopologyDescription {
                 .collect(),
         };
 
+        if suitable_servers.is_empty() {
+            // println!("no suitable servers {:?}", self.servers.values());
+        }
+        
         // If the read preference is primary, we skip the overhead of calculating the latency window
         // because we know that there's only one server selected.
         if !criteria.is_read_pref_primary() {

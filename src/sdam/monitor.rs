@@ -15,7 +15,7 @@ use crate::{
     error::Result,
     is_master::IsMasterReply,
     options::StreamAddress,
-    RUNTIME,
+    RUNTIME, client::ClusterTime,
 };
 
 pub(super) const DEFAULT_HEARTBEAT_FREQUENCY: Duration = Duration::from_secs(10);
@@ -61,15 +61,19 @@ impl Monitor {
                 None => break,
             };
 
+            println!("heartbeat");
             if self.check_if_topology_changed(server, &topology).await {
                 topology.notify_topology_changed();
             }
 
             RUNTIME.delay_for(MIN_HEARTBEAT_FREQUENCY).await;
 
-            topology
+            let req = topology
                 .wait_for_topology_check_request(heartbeat_frequency - MIN_HEARTBEAT_FREQUENCY)
                 .await;
+            if !req {
+                println!("hit timeout");
+            }
         }
     }
 
@@ -157,11 +161,11 @@ async fn is_master(connection: &mut Connection) -> Result<IsMasterReply> {
     let start_time = PreciseTime::now();
     let command_response = connection.send_command(command, None).await?;
     let end_time = PreciseTime::now();
-
-    let command_response = command_response.body()?;
-
+    
+    let is_master_response = command_response.body()?;
     Ok(IsMasterReply {
-        command_response,
+        command_response: is_master_response,
         round_trip_time: Some(start_time.to(end_time).to_std().unwrap()),
+        cluster_time: command_response.cluster_time().cloned(),
     })
 }
