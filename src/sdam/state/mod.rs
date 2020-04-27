@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 use self::server::Server;
 use super::{SessionSupportStatus, TopologyDescription};
 use crate::{
+    client::ClusterTime,
     cmap::{Command, Connection},
     error::{Error, Result},
     options::{ClientOptions, SelectionCriteria, StreamAddress},
@@ -22,7 +23,7 @@ use crate::{
         monitor::Monitor,
         srv_polling::SrvPollingMonitor,
         TopologyMessageManager,
-    }, client::ClusterTime,
+    },
 };
 
 /// A strong reference to the topology, which includes the current state as well as the client
@@ -221,7 +222,6 @@ impl Topology {
             self.mark_server_as_unknown(error.clone(), server.address.clone())
                 .await;
 
-            println!("got error requesting check");
             self.common.message_manager.request_topology_check();
 
             let wire_version = conn
@@ -252,7 +252,7 @@ impl Topology {
         // Because we're calling clone on the lock guard, we're actually copying the TopologyState
         // itself, not just making a new reference to it. The `servers` field will contain
         // references to the same instances though, since each is wrapped in an `Arc`.
-        let mut state_clone = self.state.write().await;
+        let mut state_clone = self.state.read().await.clone();
 
         let old_description = state_clone.description.clone();
 
@@ -263,29 +263,31 @@ impl Topology {
         // descriptions when errors occur. Once we implement SDAM monitoring, we can
         // properly inform users of errors that occur here.
         if let Ok(diff) = state_clone.update(server_description, &self.common.options) {
-            // self.update_state(diff, state_clone).await
-
-            if let Some(diff) = diff {
-                for new_address in diff.new_addresses {
-                    state_clone.start_monitoring_server(new_address, self.downgrade());
-                }
-                self.common.message_manager.notify_topology_changed();
-                
-                true
-            } else {
-                false
-            }
+            self.update_state(diff, state_clone).await
         } else {
             false
         }
     }
 
+    /// Update the topology's highest seen cluster time.
+    /// If the provided cluster time is not higher than the topology's currently highest seen
+    /// cluster time, this method has no effect.
     pub(crate) async fn update_cluster_time(&self, cluster_time: &ClusterTime) {
-        self.state.write().await.description.update_cluster_time(cluster_time);
+        self.state
+            .write()
+            .await
+            .description
+            .update_cluster_time(cluster_time);
     }
 
+    /// Get the topology's currently highest seen cluster time.
     pub(crate) async fn cluster_time(&self) -> Option<ClusterTime> {
-        self.state.read().await.description.cluster_time().map(Clone::clone)
+        self.state
+            .read()
+            .await
+            .description
+            .cluster_time()
+            .map(Clone::clone)
     }
 
     /// Sets the underlying TopologyState to `new_state` if `diff` indicates the topology has

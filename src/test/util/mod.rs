@@ -47,8 +47,11 @@ impl TestClient {
         Self::with_handler(None, options).await
     }
 
-    async fn with_handler(event_handler: Option<EventHandler>, options: impl Into<Option<ClientOptions>>) -> Self {
-        let mut options = options.into().unwrap_or_else(||CLIENT_OPTIONS.clone());
+    async fn with_handler(
+        event_handler: Option<EventHandler>,
+        options: impl Into<Option<ClientOptions>>,
+    ) -> Self {
+        let mut options = options.into().unwrap_or_else(|| CLIENT_OPTIONS.clone());
 
         if let Some(event_handler) = event_handler {
             let handler = Arc::new(event_handler);

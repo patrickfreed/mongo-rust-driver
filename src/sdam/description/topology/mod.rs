@@ -11,11 +11,12 @@ use bson::oid::ObjectId;
 use serde::Deserialize;
 
 use crate::{
+    client::ClusterTime,
     cmap::Command,
     error::{ErrorKind, Result},
     options::{ClientOptions, StreamAddress},
     sdam::description::server::{ServerDescription, ServerType},
-    selection_criteria::{ReadPreference, SelectionCriteria}, client::ClusterTime,
+    selection_criteria::{ReadPreference, SelectionCriteria},
 };
 
 const DEFAULT_HEARTBEAT_FREQUENCY: Duration = Duration::from_secs(10);
@@ -64,7 +65,7 @@ pub(crate) struct TopologyDescription {
 
     /// The highest reported cluster time by any server in this topology.
     cluster_time: Option<ClusterTime>,
-    
+
     /// The amount of latency beyond that of the suitable server with the minimum latency that is
     /// acceptable for a read operation.
     local_threshold: Option<Duration>,
@@ -164,7 +165,7 @@ impl TopologyDescription {
     pub(crate) fn cluster_time(&self) -> Option<&ClusterTime> {
         self.cluster_time.as_ref()
     }
-    
+
     pub(crate) fn get_server_description(
         &self,
         address: &StreamAddress,
@@ -288,6 +289,10 @@ impl TopologyDescription {
 
     /// Updates the topology's logical session timeout value based on the server's value for it.
     fn update_session_support_status(&mut self, server_description: &ServerDescription) {
+        if !server_description.server_type.is_data_bearing() {
+            return;
+        }
+
         match server_description.logical_session_timeout().ok().flatten() {
             Some(timeout) => match self.session_support_status {
                 SessionSupportStatus::Supported {
@@ -298,7 +303,6 @@ impl TopologyDescription {
                     };
                 }
                 SessionSupportStatus::Undetermined => {
-                    println!("transitioning from undetermined to supported");
                     self.session_support_status = SessionSupportStatus::Supported {
                         logical_session_timeout: timeout,
                     }
@@ -337,18 +341,16 @@ impl TopologyDescription {
             None if server_description.server_type.is_data_bearing()
                 || self.topology_type == TopologyType::Single =>
             {
-                println!("transitioning to unsupported");
                 self.session_support_status = SessionSupportStatus::Unsupported
             }
-            None => { println!("not databearing, leaving alone"); }
+            None => {}
         }
     }
 
-    /// Sets the topology's cluster time to the provided one if it is higher than the currently recorded one.
+    /// Sets the topology's cluster time to the provided one if it is higher than the currently
+    /// recorded one.
     pub(crate) fn update_cluster_time(&mut self, cluster_time: &ClusterTime) {
-        // println!("updating cluster time to {:?}", cluster_time);
-        if self.cluster_time.as_ref() > Some(cluster_time) {
-            // println!("not updating {:?} > {:?}", self.cluster_time.as_ref(), cluster_time);
+        if self.cluster_time.as_ref() >= Some(cluster_time) {
             return;
         }
         self.cluster_time = Some(cluster_time.clone());
@@ -413,10 +415,8 @@ impl TopologyDescription {
         // Update the topology's max reported $clusterTime.
         if let Some(ref cluster_time) = server_description.cluster_time().ok().flatten() {
             self.update_cluster_time(cluster_time);
-        } else {
-            println!("cluster time null");
         }
-        
+
         // Update the topology description based on the current topology type.
         match self.topology_type {
             TopologyType::Single => {}

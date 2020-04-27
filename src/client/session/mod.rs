@@ -7,6 +7,7 @@ use std::{
 };
 
 use bson::{doc, spec::BinarySubtype, Bson, Document, TimeStamp};
+use derivative::Derivative;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -50,6 +51,7 @@ impl ClientSession {
         &self.server_session.id
     }
 
+    /// Whether this session was created implicitly by the driver or explcitly by the user.
     pub(crate) fn is_implicit(&self) -> bool {
         self.is_implicit
     }
@@ -66,6 +68,17 @@ impl ClientSession {
         if self.cluster_time().map(|ct| ct < to).unwrap_or(true) {
             self.cluster_time = Some(to.clone());
         }
+    }
+
+    /// Mark this session (and the underlying server session) as dirty.
+    pub(crate) fn mark_dirty(&mut self) {
+        self.server_session.dirty = true;
+    }
+
+    /// Updates the date that the underlying server session was last used as part of an operation
+    /// sent to the server.
+    pub(crate) fn update_last_use(&mut self) {
+        self.server_session.last_use = Instant::now();
     }
 }
 
@@ -87,13 +100,13 @@ impl Drop for ClientSession {
 #[derive(Debug)]
 pub(crate) struct ServerSession {
     /// The id of the server session to which this corresponds.
-    pub(super) id: Document,
+    id: Document,
 
-    /// The last time an operation was executed in this session.
+    /// The last time an operation was executed with this session.
     last_use: std::time::Instant,
 
     /// Whether a network error was encounterd while using this session.
-    pub(super) dirty: bool,
+    dirty: bool,
 }
 
 impl ServerSession {
@@ -150,24 +163,19 @@ impl ServerSessionPool {
         while let Some(session) = pool.pop_front() {
             // If a session is about to expire within the next minute, remove it from pool.
             if session.is_about_to_expire(logical_session_timeout) {
-                println!("session is about to expire");
                 continue;
             }
             return session;
         }
-        println!("checking out new session");
         ServerSession::new()
     }
 
     /// Checks in a server session to the pool. If it is about to expire or is dirty, it will be
     /// discarded.
     pub(crate) async fn check_in(&self, session: ServerSession, logical_session_timeout: Duration) {
-        println!("checking in");
-
         let mut pool = self.pool.lock().await;
         while let Some(pooled_session) = pool.pop_back() {
             if session.is_about_to_expire(logical_session_timeout) {
-                println!("session is about to expire, dumping");
                 continue;
             }
             pool.push_back(pooled_session);
@@ -176,16 +184,27 @@ impl ServerSessionPool {
 
         if !session.dirty && !session.is_about_to_expire(logical_session_timeout) {
             pool.push_front(session);
-        } else {
-            println!("not returning to pool");
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn clear(&self) {
+        self.pool.lock().await.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn contains(&self, id: &Document) -> bool {
+        self.pool.lock().await.iter().any(|s| &s.id == id)
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Serialize)]
+#[derive(Derivative, Deserialize, Clone, Serialize)]
+#[derivative(Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClusterTime {
     cluster_time: TimeStamp,
+
+    #[derivative(Debug = "ignore")]
     signature: Document,
 }
 
@@ -199,8 +218,8 @@ impl std::cmp::Eq for ClusterTime {}
 
 impl std::cmp::Ord for ClusterTime {
     fn cmp(&self, other: &ClusterTime) -> std::cmp::Ordering {
-        let lhs = self.cluster_time.t as u64 + self.cluster_time.i as u64;
-        let rhs = other.cluster_time.t as u64 + other.cluster_time.i as u64;
+        let lhs = (self.cluster_time.t, self.cluster_time.i);
+        let rhs = (other.cluster_time.t, other.cluster_time.i);
         lhs.cmp(&rhs)
     }
 }

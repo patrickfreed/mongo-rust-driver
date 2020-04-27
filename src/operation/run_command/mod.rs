@@ -61,6 +61,10 @@ impl Operation for RunCommand {
         Ok(response.raw_response)
     }
 
+    fn name(&self) -> &str {
+        self.command_name().unwrap_or("")
+    }
+
     fn selection_criteria(&self) -> Option<&SelectionCriteria> {
         self.selection_criteria.as_ref()
     }
@@ -68,7 +72,7 @@ impl Operation for RunCommand {
     fn supports_sessions(&self) -> bool {
         self.command_name()
             .map(|command_name| {
-                SESSIONS_UNSUPPORTED_COMMANDS.contains(command_name.to_lowercase().as_str())
+                !SESSIONS_UNSUPPORTED_COMMANDS.contains(command_name.to_lowercase().as_str())
             })
             .unwrap_or(false)
     }

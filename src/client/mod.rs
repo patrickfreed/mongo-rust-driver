@@ -7,13 +7,12 @@ use std::{sync::Arc, time::Duration};
 
 use time::PreciseTime;
 
-use bson::{doc, Bson, Document};
+use bson::{Bson, Document};
 use derivative::Derivative;
 
 #[cfg(test)]
 use crate::options::StreamAddress;
 use crate::{
-    cmap::Command,
     concern::{ReadConcern, WriteConcern},
     db::Database,
     error::{ErrorKind, Result},
@@ -189,35 +188,14 @@ impl Client {
                 .session_pool
                 .check_in(session, logical_session_timeout)
                 .await;
-        } else {
-            println!("not supported");
         }
     }
 
-    /// Ends a server session via the `endSessions` command if the session is not dirty.
-    /// This method ignores any errors returned as part of the session ending process.
-    #[allow(dead_code)]
-    async fn end_server_session(&self, session: ServerSession) {
-        async fn try_end(client: &Client, session: ServerSession) -> Result<()> {
-            let server = client
-                .select_server(Some(&ReadPreference::Primary.into()))
-                .await?;
-            let mut connection = server.checkout_connection().await?;
-            let command = Command::new(
-                "endSessions".to_string(),
-                "admin".to_string(),
-                doc! {
-                    "endSessions": [ { "id": session.id } ]
-                },
-            );
-            let _: Result<_> = connection.send_command(command, None).await;
-            Ok(())
-        }
-        if !session.dirty {
-            let _: Result<_> = try_end(self, session).await;
-        }
-    }
-
+    /// Starts a `ClientSession`.
+    ///
+    /// This method will attempt to re-use server sessions from the pool which are not about to
+    /// expire according to the provided logical session timeout. If no such sessions are
+    /// available, a new one will be created.
     pub(crate) async fn start_session_with_timeout(
         &self,
         logical_session_timeout: Duration,
@@ -229,6 +207,16 @@ impl Client {
                 .await,
             self.clone(),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn clear_session_pool(&self) {
+        self.inner.session_pool.clear().await;
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn is_session_checked_in(&self, id: &Document) -> bool {
+        self.inner.session_pool.contains(id).await
     }
 
     /// Get the address of the server selected according to the given criteria.
@@ -267,7 +255,6 @@ impl Client {
                 return Ok(server);
             }
 
-            println!("couldnt select server requesting topology check");
             self.inner.topology.request_topology_check();
 
             let time_passed = start_time.to(PreciseTime::now());

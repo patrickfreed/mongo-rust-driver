@@ -8,9 +8,12 @@ use crate::{
     error::ErrorKind,
     is_master::{IsMasterCommandResponse, IsMasterReply},
     options::{ClientOptions, ReadPreference, SelectionCriteria, StreamAddress},
-    sdam::description::{
-        server::{ServerDescription, ServerType},
-        topology::{TopologyDescription, TopologyType},
+    sdam::{
+        description::{
+            server::{ServerDescription, ServerType},
+            topology::{TopologyDescription, TopologyType},
+        },
+        SessionSupportStatus,
     },
     test::{run_spec_test, TestClient, CLIENT_OPTIONS},
 };
@@ -120,8 +123,20 @@ async fn run_test(test_file: TestFile) {
             &test_file.description, i,
         );
 
-        // TODO RUST-52: Test for proper logicalSessionTimeoutMinutes value once sessions spec
-        // is implemented.
+        if let Some(logical_session_timeout) = phase.outcome.logical_session_timeout_minutes {
+            match topology_description.session_support_status {
+                SessionSupportStatus::Supported {
+                    logical_session_timeout: topology_timeout,
+                } => assert_eq!(
+                    topology_timeout,
+                    Duration::from_secs((logical_session_timeout as u64) * 60),
+                    "{}: {}",
+                    &test_file.description,
+                    i
+                ),
+                other => panic!("expected sessions support, got {:?} instead", other),
+            }
+        }
 
         if let Some(compatible) = phase.outcome.compatible {
             assert_eq!(

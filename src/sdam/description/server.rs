@@ -4,10 +4,11 @@ use bson::{oid::ObjectId, UtcDateTime};
 use chrono::offset::Utc;
 
 use crate::{
+    client::ClusterTime,
     error::Result,
     is_master::IsMasterReply,
     options::StreamAddress,
-    selection_criteria::TagSet, client::ClusterTime,
+    selection_criteria::TagSet,
 };
 
 const DRIVER_MIN_DB_VERSION: &str = "3.6";
@@ -315,7 +316,7 @@ impl ServerDescription {
             Err(ref e) => Err(e.clone()),
         }
     }
-    
+
     pub(crate) fn matches_tag_set(&self, tag_set: &TagSet) -> bool {
         let reply = match self.reply.as_ref() {
             Ok(Some(ref reply)) => reply,

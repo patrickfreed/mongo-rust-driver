@@ -89,9 +89,14 @@ impl Operation for Find {
             body.insert("filter", filter.clone());
         }
 
-        Ok(Command::new(
+        Ok(Command::new_read(
             Self::NAME.to_string(),
             self.ns.db.clone(),
+            self.options
+                .as_ref()
+                .and_then(|options| options.selection_criteria.as_ref())
+                .and_then(|criteria| criteria.as_read_pref())
+                .cloned(),
             body,
         ))
     }

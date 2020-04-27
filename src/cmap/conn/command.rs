@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use bson::{doc, Bson, Document};
+use bson::{Bson, Document};
 use serde::de::DeserializeOwned;
 
 use super::wire::Message;
@@ -54,10 +54,7 @@ impl Command {
 
     pub(crate) fn set_cluster_time(&mut self, cluster_time: &ClusterTime) {
         if let Ok(doc) = bson::to_bson(cluster_time) {
-            self.body.insert(
-                "$clusterTime",
-                doc,
-            );
+            self.body.insert("$clusterTime", doc);
         } else {
             println!("error converting to bson");
         }

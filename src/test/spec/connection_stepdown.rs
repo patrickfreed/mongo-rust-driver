@@ -22,7 +22,7 @@ async fn run_test<F: Future>(name: &str, test: impl Fn(EventClient, Database, Co
     // TODO RUST-51: Disable retryable writes once they're implemented.
     let client = EventClient::new().await;
 
-    if client.options.repl_set_name.is_none() {
+    if !client.is_replica_set() {
         return;
     }
 
@@ -84,7 +84,9 @@ async fn get_more() {
             .await
             .unwrap();
 
-        db.run_command(doc! { "replSetStepDown": 5, "force": true }, None)
+        client
+            .database("admin")
+            .run_command(doc! { "replSetStepDown": 5, "force": true }, None)
             .await
             .expect("stepdown should have succeeded");
 

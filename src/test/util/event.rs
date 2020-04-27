@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, sync::{Arc, RwLock}};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, RwLock},
+};
 
 use bson::doc;
 
@@ -13,7 +16,8 @@ use crate::{
             CommandSucceededEvent,
         },
     },
-    test::LOCK, options::ClientOptions,
+    options::ClientOptions,
+    test::LOCK,
 };
 
 pub type EventQueue<T> = Arc<RwLock<VecDeque<T>>>;
@@ -48,7 +52,7 @@ impl CommandEvent {
             CommandEvent::CommandSucceededEvent(event) => event.request_id,
         }
     }
-    
+
     fn as_command_started(&self) -> Option<&CommandStartedEvent> {
         match self {
             CommandEvent::CommandStartedEvent(e) => Some(e),
@@ -130,6 +134,9 @@ impl EventClient {
         let pool_cleared_events = handler.pool_cleared_events.clone();
         let client = TestClient::with_handler(Some(handler), options).await;
 
+        // clear events from commands used to set up client.
+        command_events.write().unwrap().clear();
+
         Self {
             client,
             command_events,
@@ -137,34 +144,40 @@ impl EventClient {
         }
     }
 
-    /// Gets the first started/succeeded pair of events for the given command name, popping off all events before and
-    /// between them.
+    /// Gets the first started/succeeded pair of events for the given command name, popping off all
+    /// events before and between them.
     ///
     /// Panics if the command failed or could not be found in the events.
-    pub fn get_successful_command_execution(&self, command_name: &str) -> (CommandStartedEvent, CommandSucceededEvent) {
+    pub fn get_successful_command_execution(
+        &self,
+        command_name: &str,
+    ) -> (CommandStartedEvent, CommandSucceededEvent) {
         let mut command_events = self.command_events.write().unwrap();
 
         let mut started: Option<CommandStartedEvent> = None;
-        
+
         while let Some(event) = command_events.pop_front() {
             if event.command_name() == command_name {
                 match started {
                     None => {
-                        started = Some(event
-                                       .as_command_started()
-                                       .expect(format!("first event not a command started event {:?}", event).as_str())
-                                       .clone());
+                        let event = event
+                            .as_command_started()
+                            .unwrap_or_else(|| {
+                                panic!("first event not a command started event {:?}", event)
+                            })
+                            .clone();
+                        started = Some(event);
                         continue;
-                    },
+                    }
                     Some(started) if event.request_id() == started.request_id => {
                         let succeeded = event
                             .as_command_succeeded()
                             .expect("second event not a command succeeded event")
                             .clone();
-                        
-                        return (started, succeeded)
-                    },
-                    _ => continue
+
+                        return (started, succeeded);
+                    }
+                    _ => continue,
                 }
             }
         }

@@ -55,6 +55,7 @@ impl<T: GetMoreProvider> GenericCursor<T> {
 
 impl<T: GetMoreProvider> Stream for GenericCursor<T> {
     type Item = Result<Document>;
+
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             if let Some(future) = self.provider.executing_future() {

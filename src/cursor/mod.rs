@@ -87,13 +87,11 @@ pub struct Cursor {
 impl Cursor {
     #[allow(dead_code)]
     pub(crate) fn new(client: Client, spec: CursorSpecification, session: ClientSession) -> Self {
+        let provider = ImplicitSessionGetMoreProvider::new(&spec, session);
+
         Self {
             client: client.clone(),
-            wrapped_cursor: GenericCursor::new(
-                client,
-                spec,
-                ImplicitSessionGetMoreProvider::new(session),
-            ),
+            wrapped_cursor: GenericCursor::new(client, spec, provider),
         }
     }
 }
@@ -132,11 +130,16 @@ impl GetMoreProviderResult for ExecutionResult {
 enum ImplicitSessionGetMoreProvider {
     Executing(BoxFuture<'static, ExecutionResult>),
     Idle(ClientSession),
+    Done,
 }
 
 impl ImplicitSessionGetMoreProvider {
-    fn new(session: ClientSession) -> Self {
-        Self::Idle(session)
+    fn new(spec: &CursorSpecification, session: ClientSession) -> Self {
+        if spec.id() == 0 {
+            Self::Done
+        } else {
+            Self::Idle(session)
+        }
     }
 }
 
@@ -146,12 +149,17 @@ impl GetMoreProvider for ImplicitSessionGetMoreProvider {
     fn executing_future(&mut self) -> Option<&mut Self::GetMoreFuture> {
         match self {
             Self::Executing(ref mut future) => Some(future),
-            Self::Idle(_) => None,
+            Self::Idle(_) | Self::Done => None,
         }
     }
 
     fn clear_execution(&mut self, result: Self::GetMoreResult) {
-        *self = Self::Idle(result.session)
+        // If cursor is exhausted, immediately return implicit session to the pool.
+        if result.get_more_result.map(|r| r.exhausted).unwrap_or(false) {
+            *self = Self::Done;
+        } else {
+            *self = Self::Idle(result.session)
+        }
     }
 
     fn start_execution(&mut self, info: CursorInformation, client: Client) {
@@ -169,7 +177,7 @@ impl GetMoreProvider for ImplicitSessionGetMoreProvider {
                 });
                 Self::Executing(future)
             }
-            Self::Executing(_) => self_,
+            Self::Executing(_) | Self::Done => self_,
         })
     }
 }
