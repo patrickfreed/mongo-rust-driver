@@ -7,9 +7,7 @@ use crate::{
     error::Result,
     options::{Acknowledgment, FindOptions, InsertOneOptions, ReadPreference, WriteConcern},
     test::{EventClient, TestClient, CLIENT_OPTIONS, LOCK},
-    Client,
-    Collection,
-    RUNTIME,
+    Client, Collection, RUNTIME,
 };
 
 /// Macro defining a closure that returns a future populated by an operation on the
@@ -157,7 +155,8 @@ macro_rules! for_each_op {
             ),
         )
         .await;
-        $test_func("drop", collection_op!($test_name, coll, coll.drop(None))).await;
+        // TODO: RUST-392 unskip this operation.
+        // $test_func("drop", collection_op!($test_name, coll, coll.drop(None))).await;
 
         // db operations
         $test_func(
@@ -175,7 +174,8 @@ macro_rules! for_each_op {
             db_op!($test_name, db, db.create_collection("sessionopcoll", None)),
         )
         .await;
-        $test_func("dropDatabase", db_op!($test_name, db, db.drop(None))).await;
+        // TODO: RUST-392 unskip this operation.
+        // $test_func("dropDatabase", db_op!($test_name, db, db.drop(None))).await;
 
         // client operations
         $test_func(
@@ -251,25 +251,25 @@ async fn cluster_time_in_commands() {
         operation(client.clone())
             .await
             .expect("operation should succeed");
-        let (command_started, command_succeeded) =
-            client.get_successful_command_execution(command_name);
-
-        assert!(command_started.command.get("$clusterTime").is_some());
-
-        let response_cluster_time = command_succeeded
-            .reply
-            .get("$clusterTime")
-            .expect("should get cluster time from command response");
 
         operation(client.clone())
             .await
             .expect("operation should succeed");
-        let (command_started, command_succeded) =
+
+        let (first_command_started, first_command_succeeded) =
             client.get_successful_command_execution(command_name);
+
+        assert!(first_command_started.command.get("$clusterTime").is_some());
+        let response_cluster_time = first_command_succeeded
+            .reply
+            .get("$clusterTime")
+            .expect("should get cluster time from command response");
+
+        let (second_command_started, _) = client.get_successful_command_execution(command_name);
 
         assert_eq!(
             response_cluster_time,
-            command_started
+            second_command_started
                 .command
                 .get("$clusterTime")
                 .expect("second command should contain cluster time"),
