@@ -303,3 +303,54 @@ async fn cmap_spec_tests() {
 
     run_spec_test(&["connection-monitoring-and-pooling"], run_cmap_spec_tests).await;
 }
+
+#[cfg_attr(feature = "tokio-runtime", tokio::test)]
+#[cfg_attr(feature = "async-std-runtime", async_std::test)]
+async fn blah() {
+    let _guard = LOCK.run_exclusively().await;
+
+    let handler = Arc::new(EventHandler::new(Default::default()));
+    let options = ConnectionPoolOptions::builder()
+        .event_handler(handler.clone() as Arc<dyn crate::cmap::CmapEventHandler>)
+        .build();
+    let pool = ConnectionPool::new(
+        CLIENT_OPTIONS.hosts[0].clone(),
+        Default::default(),
+        Some(options),
+    );
+
+    let mut tasks: Vec<AsyncJoinHandle<()>> = Default::default();
+    for _ in 1..10 {
+        let pool_clone = pool.clone();
+        tasks.push(
+            RUNTIME
+                .spawn(async move {
+                    pool_clone.check_out().await.unwrap();
+                })
+                .unwrap(),
+        );
+    }
+
+    while let Some(handle) = tasks.pop() {
+        let _ = handle.await;
+    }
+
+    let mut events = handler.events.write().unwrap();
+    let mut consecutive_creations = 0;
+    while let Some(event) = events.pop_front() {
+        match event {
+            Event::ConnectionCreated(_) => {
+                println!("create");
+                consecutive_creations += 1;
+                if consecutive_creations > 2 {
+                    panic!("max connecting not respected!");
+                }
+            }
+            Event::ConnectionReady(_) => {
+                println!("ready");
+                consecutive_creations = 0
+            }
+            _ => (),
+        }
+    }
+}

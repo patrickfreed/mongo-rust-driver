@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
 use serde::{de::Unexpected, Deserialize, Deserializer};
@@ -7,7 +8,7 @@ use crate::{event::cmap::*, options::StreamAddress};
 #[derive(Clone, Debug)]
 pub struct EventHandler {
     ignore: Vec<String>,
-    pub events: Arc<RwLock<Vec<Event>>>,
+    pub events: Arc<RwLock<VecDeque<Event>>>,
 }
 
 impl EventHandler {
@@ -22,7 +23,7 @@ impl EventHandler {
         let event = event.into();
 
         if !self.ignore.iter().any(|e| e == event.name()) {
-            self.events.write().unwrap().push(event);
+            self.events.write().unwrap().push_back(event);
         }
     }
 }
