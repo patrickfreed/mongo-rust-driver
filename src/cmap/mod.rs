@@ -29,13 +29,8 @@ use self::{
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler,
-        ConnectionCheckoutFailedEvent,
-        ConnectionCheckoutFailedReason,
-        ConnectionCheckoutStartedEvent,
-        ConnectionClosedReason,
-        PoolClearedEvent,
-        PoolClosedEvent,
+        CmapEventHandler, ConnectionCheckoutFailedEvent, ConnectionCheckoutFailedReason,
+        ConnectionCheckoutStartedEvent, ConnectionClosedReason, PoolClearedEvent, PoolClosedEvent,
         PoolCreatedEvent,
     },
     options::StreamAddress,
@@ -301,7 +296,9 @@ impl ConnectionPoolInner {
 
         // There are no connections in the pool, so open a new one.
         let pending_connection = self.create_pending_connection(&wait_queue_handle);
+        println!("establishing...");
         let establish_result = self.establish_connection(pending_connection).await;
+        println!("done!");
         if establish_result.is_ok() {
             wait_queue_handle.disarm();
         }

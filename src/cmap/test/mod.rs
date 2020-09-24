@@ -18,7 +18,7 @@ use crate::{
     error::{Error, Result},
     options::TlsOptions,
     runtime::AsyncJoinHandle,
-    test::{assert_matches, run_spec_test, Matchable, CLIENT_OPTIONS, LOCK},
+    test::{assert_matches, run_spec_test, EventClient, Matchable, CLIENT_OPTIONS, LOCK},
     RUNTIME,
 };
 
@@ -160,6 +160,11 @@ impl Executor {
                 actual_events.deref()
             )
         }
+
+        println!("actual");
+        for event in actual_events.iter() {
+            println!("{}", event.name());
+        }
         for i in 0..self.events.len() {
             assert_matches(
                 &actual_events[i],
@@ -179,11 +184,14 @@ impl Operation {
             match self {
                 Operation::StartHelper { target, operations } => {
                     let state_ref = state.clone();
+                    let target_name = target.clone();
                     let task = RUNTIME.spawn(async move {
                         for operation in operations {
+                            println!("{}: {:?}", target_name, operation);
                             // If any error occurs during an operation, we halt the thread and yield
                             // that value when `join` is called on the thread.
                             operation.execute(state_ref.clone()).await?;
+                            println!("{}: done!", target_name);
                         }
                         Ok(())
                     });
@@ -306,11 +314,35 @@ impl Matchable for Event {
 #[cfg_attr(feature = "async-std-runtime", async_std::test)]
 async fn cmap_spec_tests() {
     async fn run_cmap_spec_tests(test_file: TestFile) {
+        if !test_file
+            .description
+            .contains("maxConnecting check out returned")
+        {
+            return;
+        }
         if TEST_DESCRIPTIONS_TO_SKIP.contains(&test_file.description.as_str()) {
             return;
         }
 
         let _guard: RwLockReadGuard<()> = LOCK.run_concurrently().await;
+
+        let client = EventClient::new().await;
+        if let Some(ref run_on) = test_file.run_on {
+            let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
+            if !can_run_on {
+                println!("Skipping {}", test_file.description);
+                return;
+            }
+        }
+
+        if let Some(ref fail_point) = test_file.fail_point {
+            println!("fp");
+            client
+                .database("admin")
+                .run_command(fail_point.clone(), None)
+                .await
+                .unwrap();
+        }
 
         let executor = Executor::new(test_file);
         executor.execute_test().await;
