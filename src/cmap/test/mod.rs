@@ -314,15 +314,14 @@ impl Matchable for Event {
 #[cfg_attr(feature = "async-std-runtime", async_std::test)]
 async fn cmap_spec_tests() {
     async fn run_cmap_spec_tests(test_file: TestFile) {
-        if !test_file
-            .description
-            .contains("maxConnecting check out returned")
-        {
+        if !test_file.description.contains("maxConnecting is enforced") {
             return;
         }
         if TEST_DESCRIPTIONS_TO_SKIP.contains(&test_file.description.as_str()) {
             return;
         }
+
+        println!("running {}", test_file.description);
 
         let _guard: RwLockReadGuard<()> = LOCK.run_concurrently().await;
 

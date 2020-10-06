@@ -80,6 +80,13 @@ impl WaitQueue {
         })
     }
 
+    pub(super) async fn reenter_queue(
+        &self,
+        handle: WaitQueueHandle<'_>,
+    ) -> Result<WaitQueueHandle<'_>> {
+        todo!()
+    }
+
     /// Signals that the front of the queue (if there is one) is ready to wake up.
     pub(super) fn wake_front(&self) {
         if self.semaphore.permits() >= self.max_permits {

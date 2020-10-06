@@ -106,6 +106,9 @@ pub(crate) struct ConnectionPoolInner {
     /// A thread will only reach the front of the queue if a connection is available to be checked
     /// out or if one could be created without going over `max_pool_size`.
     wait_queue: WaitQueue,
+
+    /// The queue that operations wait in to create a new connection.
+    max_connecting_queue: WaitQueue,
 }
 
 impl ConnectionPool {
@@ -136,6 +139,8 @@ impl ConnectionPool {
             .as_ref()
             .map(|pool_options| ConnectionOptions::from(pool_options.clone()));
 
+        let max_connecting_queue = WaitQueue::new(address.clone(), 2, wait_queue_timeout);
+
         let inner = ConnectionPoolInner {
             address: address.clone(),
             event_handler,
@@ -148,6 +153,7 @@ impl ConnectionPool {
             generation: AtomicU32::new(0),
             connection_options,
             available_connections: Mutex::new(VecDeque::new()),
+            max_connecting_queue,
         };
 
         let pool = Self {
@@ -265,44 +271,84 @@ impl ConnectionPoolInner {
     /// Waits for the thread to reach the front of the wait queue, then attempts to check out a
     /// connection. If none are available in the pool, one is created and checked out instead.
     async fn acquire_or_create_connection(&self) -> Result<Connection> {
+        async fn acquire_available_connection<'a>(
+            pool: &'a ConnectionPoolInner,
+            wait_queue_handle: &mut WaitQueueHandle<'a>,
+        ) -> Option<Connection> {
+            let mut available_connections_lock = pool.available_connections.lock().await;
+            while let Some(conn) = available_connections_lock.pop_back() {
+                // Close the connection if it's stale.
+                if conn.is_stale(pool.generation.load(Ordering::SeqCst)) {
+                    pool.close_connection(conn, ConnectionClosedReason::Stale);
+                    continue;
+                }
+
+                // Close the connection if it's idle.
+                if conn.is_idle(pool.max_idle_time) {
+                    pool.close_connection(conn, ConnectionClosedReason::Idle);
+                    continue;
+                }
+
+                // Otherwise, return the connection.
+                wait_queue_handle.disarm();
+                return Some(conn);
+            }
+            None
+        }
         // Handle that will wake up the front of the queue when dropped.
         // Before returning a valid connection, this handle must be disarmed to prevent the front
         // from waking up early.
         let mut wait_queue_handle = self.wait_queue.wait_until_at_front().await?;
 
-        // Try to get the most recent available connection.
-        let mut available_connections_lock = self.available_connections.lock().await;
-        while let Some(conn) = available_connections_lock.pop_back() {
-            // Close the connection if it's stale.
-            if conn.is_stale(self.generation.load(Ordering::SeqCst)) {
-                self.close_connection(conn, ConnectionClosedReason::Stale);
-                continue;
+        let mut conn: Option<Connection> = None;
+
+        while conn.is_none() {
+            // Try to get the most recent available connection.
+            // let mut available_connections_lock = self.available_connections.lock().await;
+            // while let Some(conn) = available_connections_lock.pop_back() {
+            //     // Close the connection if it's stale.
+            //     if conn.is_stale(self.generation.load(Ordering::SeqCst)) {
+            //         self.close_connection(conn, ConnectionClosedReason::Stale);
+            //         continue;
+            //     }
+
+            //     // Close the connection if it's idle.
+            //     if conn.is_idle(self.max_idle_time) {
+            //         self.close_connection(conn, ConnectionClosedReason::Idle);
+            //         continue;
+            //     }
+
+            //     // Otherwise, return the connection.
+            //     wait_queue_handle.disarm();
+            //     return Ok(conn);
+            // }
+            if let Some(conn) = acquire_available_connection(self, &mut wait_queue_handle).await {
+                return Ok(conn);
             }
 
-            // Close the connection if it's idle.
-            if conn.is_idle(self.max_idle_time) {
-                self.close_connection(conn, ConnectionClosedReason::Idle);
-                continue;
+            loop {
+                // drop the lock before we create a new connection to allow other connections to stop
+                // waiting.
+                // drop(available_connections_lock);
+                let max_connecting_handle = self.max_connecting_queue.wait_until_at_front().await?;
+
+                if let Some(conn) = acquire_available_connection(self, &mut wait_queue_handle).await
+                {
+                    return Ok(conn);
+                }
+
+                // There are no connections in the pool, so open a new one.
+                let pending_connection = self.create_pending_connection(&wait_queue_handle);
+                println!("establishing...");
+                let establish_result = self.establish_connection(pending_connection).await;
+                println!("done!");
+                if establish_result.is_ok() {
+                    wait_queue_handle.disarm();
+                }
+                return establish_result;
             }
-
-            // Otherwise, return the connection.
-            wait_queue_handle.disarm();
-            return Ok(conn);
         }
-
-        // drop the lock before we create a new connection to allow other connections to stop
-        // waiting.
-        drop(available_connections_lock);
-
-        // There are no connections in the pool, so open a new one.
-        let pending_connection = self.create_pending_connection(&wait_queue_handle);
-        println!("establishing...");
-        let establish_result = self.establish_connection(pending_connection).await;
-        println!("done!");
-        if establish_result.is_ok() {
-            wait_queue_handle.disarm();
-        }
-        establish_result
+        todo!()
     }
 
     /// Create a connection that has not been established, incrementing the total connection count
