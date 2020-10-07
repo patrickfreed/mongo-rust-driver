@@ -6,6 +6,7 @@ pub(crate) mod conn;
 mod establish;
 pub(crate) mod options;
 mod wait_queue;
+mod worker;
 
 use std::{
     collections::VecDeque,
@@ -17,7 +18,7 @@ use std::{
 };
 
 use derivative::Derivative;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
@@ -34,11 +35,12 @@ use crate::{
         PoolCreatedEvent,
     },
     options::StreamAddress,
-    runtime::HttpClient,
+    runtime::{AsyncJoinHandle, HttpClient},
     RUNTIME,
 };
 use conn::PendingConnection;
 use wait_queue::WaitQueueHandle;
+use worker::ConnectionRequestResult;
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -101,6 +103,8 @@ pub(crate) struct ConnectionPoolInner {
     /// them to the pool.
     min_pool_size: Option<u32>,
 
+    max_pool_size: u32,
+
     /// The queue that operations wait in to check out a connection.
     ///
     /// A thread will only reach the front of the queue if a connection is available to be checked
@@ -109,6 +113,12 @@ pub(crate) struct ConnectionPoolInner {
 
     /// The queue that operations wait in to create a new connection.
     max_connecting_queue: WaitQueue,
+
+    wait_queue_sender: mpsc::UnboundedSender<oneshot::Sender<ConnectionRequestResult>>,
+
+    connection_return_sender: mpsc::UnboundedSender<Connection>,
+
+    wait_queue_timeout: Option<Duration>,
 }
 
 impl ConnectionPool {
@@ -141,6 +151,9 @@ impl ConnectionPool {
 
         let max_connecting_queue = WaitQueue::new(address.clone(), 2, wait_queue_timeout);
 
+        let (wait_queue_sender, wait_queue_receiver) = mpsc::unbounded_channel();
+        let (connection_return_sender, connection_return_receiver) = mpsc::unbounded_channel();
+
         let inner = ConnectionPoolInner {
             address: address.clone(),
             event_handler,
@@ -154,6 +167,10 @@ impl ConnectionPool {
             connection_options,
             available_connections: Mutex::new(VecDeque::new()),
             max_connecting_queue,
+            wait_queue_sender,
+            connection_return_sender,
+            max_pool_size,
+            wait_queue_timeout,
         };
 
         let pool = Self {
@@ -166,6 +183,11 @@ impl ConnectionPool {
         });
 
         background::start_background_task(Arc::downgrade(&pool.inner));
+        worker::start(
+            wait_queue_receiver,
+            connection_return_receiver,
+            Arc::downgrade(&pool.inner),
+        );
 
         pool
     }
@@ -175,7 +197,7 @@ impl ConnectionPool {
     /// pool and the total number of connections is not less than the max pool size. If the method
     /// blocks for longer than `wait_queue_timeout`, a `WaitQueueTimeoutError` will be returned.
     pub(crate) async fn check_out(&self) -> Result<Connection> {
-        let mut conn = self.inner.check_out().await?;
+        let mut conn = self.inner.check_out_v2().await?;
         conn.mark_as_in_use(Arc::downgrade(&self.inner));
         Ok(conn)
     }
@@ -186,7 +208,7 @@ impl ConnectionPool {
     /// facilitate detecting if the connection becomes idle.
     #[cfg(test)]
     pub(crate) async fn check_in(&self, conn: Connection) {
-        self.inner.check_in(conn).await;
+        self.inner.check_in_v2(conn).await;
     }
 
     /// Increments the generation of the pool. Rather than eagerly removing stale connections from
@@ -227,6 +249,86 @@ impl ConnectionPoolInner {
         }
 
         self.wait_queue.wake_front();
+    }
+
+    async fn check_in_v2(&self, mut conn: Connection) {
+        self.emit_event(|handler| {
+            handler.handle_connection_checked_in_event(conn.checked_in_event());
+        });
+
+        conn.mark_as_available();
+
+        // Close the connection if it's stale.
+        if conn.is_stale(self.generation.load(Ordering::SeqCst)) {
+            self.close_connection(conn, ConnectionClosedReason::Stale);
+        } else if conn.is_executing() {
+            self.close_connection(conn, ConnectionClosedReason::Dropped)
+        } else {
+            self.connection_return_sender.send(conn).unwrap();
+        }
+    }
+
+    async fn check_out_v2(&self) -> Result<Connection> {
+        let (sender, receiver) = oneshot::channel();
+        let wait_queue_sender = self.wait_queue_sender.clone();
+
+        self.emit_event(|handler| {
+            let event = ConnectionCheckoutStartedEvent {
+                address: self.address.clone(),
+            };
+
+            handler.handle_connection_checkout_started_event(event);
+        });
+
+        let conn = match wait_queue_sender.send(sender) {
+            Ok(_) => {
+                let response = match self.wait_queue_timeout {
+                    Some(timeout) => RUNTIME
+                        .timeout(timeout, receiver)
+                        .await
+                        .map(|r| r.unwrap())
+                        .map_err(|e| {
+                            ErrorKind::WaitQueueTimeoutError {
+                                address: self.address.clone(),
+                            }
+                            .into()
+                        }),
+                    None => Ok(receiver.await.unwrap()),
+                };
+
+                match response {
+                    Ok(ConnectionRequestResult::Pooled(c)) => Ok(c),
+                    Ok(ConnectionRequestResult::Establishing(task)) => task.await.unwrap(),
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => panic!("woops {:?}", e),
+        };
+
+        match conn {
+            Ok(ref conn) => {
+                self.emit_event(|handler| {
+                    handler.handle_connection_checked_out_event(conn.checked_out_event());
+                });
+            }
+            Err(ref e) => {
+                let failure_reason =
+                    if let ErrorKind::WaitQueueTimeoutError { .. } = e.kind.as_ref() {
+                        ConnectionCheckoutFailedReason::Timeout
+                    } else {
+                        ConnectionCheckoutFailedReason::ConnectionError
+                    };
+
+                self.emit_event(|handler| {
+                    handler.handle_connection_checkout_failed_event(ConnectionCheckoutFailedEvent {
+                        address: self.address.clone(),
+                        reason: failure_reason,
+                    })
+                });
+            }
+        }
+
+        conn
     }
 
     async fn check_out(&self) -> Result<Connection> {
@@ -356,6 +458,26 @@ impl ConnectionPoolInner {
     ///
     /// This MUST ONLY be called while holding a handle to the wait queue.
     fn create_pending_connection(&self, _wait_queue_handle: &WaitQueueHandle) -> PendingConnection {
+        self.total_connection_count.fetch_add(1, Ordering::SeqCst);
+
+        let connection = PendingConnection {
+            id: self.next_connection_id.fetch_add(1, Ordering::SeqCst),
+            address: self.address.clone(),
+            generation: self.generation.load(Ordering::SeqCst),
+            options: self.connection_options.clone(),
+        };
+        self.emit_event(|handler| {
+            handler.handle_connection_created_event(connection.created_event())
+        });
+
+        connection
+    }
+
+    /// Create a connection that has not been established, incrementing the total connection count
+    /// and emitting the appropriate events. This method performs no I/O.
+    ///
+    /// This MUST ONLY be called while holding a handle to the wait queue.
+    fn create_pending_connection_v2(&self) -> PendingConnection {
         self.total_connection_count.fetch_add(1, Ordering::SeqCst);
 
         let connection = PendingConnection {
