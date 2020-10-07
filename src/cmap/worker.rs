@@ -2,12 +2,8 @@ use super::{Connection, ConnectionPoolInner};
 use crate::{
     error::Result, event::cmap::ConnectionClosedReason, runtime::AsyncJoinHandle, RUNTIME,
 };
-use futures::{future::Either, pin_mut};
-use std::{
-    pin::Pin,
-    sync::{atomic::Ordering, Weak},
-    time::Duration,
-};
+
+use std::sync::{atomic::Ordering, Weak};
 use tokio::sync::{mpsc, oneshot};
 
 pub(super) fn start(
@@ -94,8 +90,8 @@ pub(super) fn start(
                         None if pool.total_connection_count.load(Ordering::SeqCst)
                             < pool.max_pool_size =>
                         {
+                            let pending_connection = pool.create_pending_connection();
                             drop(available_connections_lock);
-                            let pending_connection = pool.create_pending_connection_v2();
 
                             let handle = RUNTIME
                                 .spawn(async move {
@@ -126,7 +122,6 @@ pub(super) fn start(
                     }
                     // request_recv = Some(fut);
                 }
-                _ => todo!(),
             }
         }
     })

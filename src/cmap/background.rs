@@ -75,24 +75,26 @@ impl ConnectionPoolInner {
     async fn ensure_min_connections(&self) {
         if let Some(min_pool_size) = self.min_pool_size {
             loop {
+                let available_connections = self.available_connections.lock().await;
                 if self.total_connection_count.load(Ordering::SeqCst) < min_pool_size {
-                    // Reserve a spot via the wait queue. This will prevent too many threads from
-                    // concurrently creating connections such that max_pool_size is exceeded.
-                    let wait_queue_handle = match self.wait_queue.try_skip_queue() {
-                        None => {
-                            // This branch is rarely taken because we _just_ verified that
-                            // total_connection_count < min_pool_size, which implies
-                            // total_connection_count <= max_pool_size. It is possible however to
-                            // take this branch if a bunch of operation threads enter the queue
-                            // between the count check and our attempt to reserve a spot. In that
-                            // case we just return early because those threads that did enter the
-                            // queue will ensure min_pool_size is fulfilled.
-                            return;
-                        }
-                        Some(handle) => handle,
-                    };
+                    // // Reserve a spot via the wait queue. This will prevent too many threads from
+                    // // concurrently creating connections such that max_pool_size is exceeded.
+                    // let wait_queue_handle = match self.wait_queue.try_skip_queue() {
+                    //     None => {
+                    //         // This branch is rarely taken because we _just_ verified that
+                    //         // total_connection_count < min_pool_size, which implies
+                    //         // total_connection_count <= max_pool_size. It is possible however to
+                    //         // take this branch if a bunch of operation threads enter the queue
+                    //         // between the count check and our attempt to reserve a spot. In that
+                    //         // case we just return early because those threads that did enter the
+                    //         // queue will ensure min_pool_size is fulfilled.
+                    //         return;
+                    //     }
+                    //     Some(handle) => handle,
+                    // };
 
-                    let connection = self.create_pending_connection(&wait_queue_handle);
+                    let connection = self.create_pending_connection();
+                    drop(available_connections);
                     match self.establish_connection(connection).await {
                         Ok(mut connection) => {
                             let mut available_connections = self.available_connections.lock().await;

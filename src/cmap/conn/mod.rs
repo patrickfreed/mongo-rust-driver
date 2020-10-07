@@ -293,7 +293,7 @@ impl Drop for Connection {
                 let dropped_connection_state = self.take();
                 RUNTIME.execute(async move {
                     strong_pool_ref
-                        .check_in_v2(dropped_connection_state.into())
+                        .check_in(dropped_connection_state.into())
                         .await;
                 });
             } else {
