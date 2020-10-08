@@ -10,13 +10,17 @@ use std::{
 use derivative::Derivative;
 
 use self::wire::Message;
-use super::ConnectionPoolInner;
+use super::{worker::PoolManager, ConnectionPoolInner};
 use crate::{
     cmap::options::{ConnectionOptions, StreamOptions},
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler, ConnectionCheckedInEvent, ConnectionCheckedOutEvent,
-        ConnectionClosedEvent, ConnectionClosedReason, ConnectionCreatedEvent,
+        CmapEventHandler,
+        ConnectionCheckedInEvent,
+        ConnectionCheckedOutEvent,
+        ConnectionClosedEvent,
+        ConnectionClosedReason,
+        ConnectionCreatedEvent,
         ConnectionReadyEvent,
     },
     options::{StreamAddress, TlsOptions},
@@ -52,10 +56,9 @@ pub(crate) struct Connection {
     /// to detect if the connection is idle.
     ready_and_available_time: Option<Instant>,
 
-    /// The connection will have a weak reference to its pool when it's checked out. When it's
-    /// A reference to the pool that maintains the connection. If the connection is currently
-    /// currently checked into the pool, this will be None.
-    pub(super) pool: Option<Weak<ConnectionPoolInner>>,
+    /// PoolManager used to check this connection back in when dropped.
+    /// None when checked into the pool.
+    pub(super) pool_manager: Option<PoolManager>,
 
     /// Whether or not a command is currently being run on this connection. This is set to `true`
     /// right before sending bytes to the server and set back to `false` once a full response has
@@ -84,7 +87,7 @@ impl Connection {
         let conn = Self {
             id,
             generation,
-            pool: None,
+            pool_manager: None,
             command_executing: false,
             ready_and_available_time: None,
             stream: AsyncStream::connect(stream_options).await?,
@@ -150,7 +153,7 @@ impl Connection {
     /// Helper to mark the time that the connection was checked into the pool for the purpose of
     /// detecting when it becomes idle.
     pub(super) fn mark_as_available(&mut self) {
-        self.pool.take();
+        self.pool_manager.take();
         self.ready_and_available_time = Some(Instant::now());
     }
 
@@ -158,7 +161,12 @@ impl Connection {
     /// connection is not marked as idle based on the time that it's checked out and that it has a
     /// reference to the pool.
     pub(super) fn mark_as_in_use(&mut self, pool: Weak<ConnectionPoolInner>) {
-        self.pool = Some(pool);
+        // self.pool = Some(pool);
+        self.ready_and_available_time.take();
+    }
+
+    pub(super) fn mark_as_in_use_v2(&mut self, manager: PoolManager) {
+        self.pool_manager = Some(manager);
         self.ready_and_available_time.take();
     }
 
@@ -254,7 +262,7 @@ impl Connection {
 
     /// Close this connection, emitting a `ConnectionClosedEvent` with the supplied reason.
     fn close(&mut self, reason: ConnectionClosedReason) {
-        self.pool.take();
+        self.pool_manager.take();
         if let Some(ref handler) = self.handler {
             handler.handle_connection_closed_event(self.closed_event(reason));
         }
@@ -263,7 +271,6 @@ impl Connection {
     /// Nullify the inner state and return it in a `DroppedConnectionState` for checking back in to
     /// the pool in a background task.
     fn take(&mut self) -> DroppedConnectionState {
-        self.pool.take();
         DroppedConnectionState {
             id: self.id,
             address: self.address.clone(),
@@ -278,7 +285,7 @@ impl Connection {
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        // If the connection has a weak reference to a pool, that means that the connection is
+        // If the connection has a pool manager, that means that the connection is
         // being dropped when it's checked out. If the pool is still alive, it
         // should check itself back in. Otherwise, the connection should close
         // itself and emit a ConnectionClosed event (because the `close_and_drop`
@@ -288,17 +295,9 @@ impl Drop for Connection {
         // being dropped while it's not checked out. This means that the pool called
         // the `close_and_drop` helper explicitly, so we don't add it back to the
         // pool or emit any events.
-        if let Some(ref weak_pool_ref) = self.pool {
-            if let Some(strong_pool_ref) = weak_pool_ref.upgrade() {
-                let dropped_connection_state = self.take();
-                RUNTIME.execute(async move {
-                    strong_pool_ref
-                        .check_in(dropped_connection_state.into())
-                        .await;
-                });
-            } else {
-                self.close(ConnectionClosedReason::PoolClosed);
-            }
+        if let Some(pool_manager) = self.pool_manager.take() {
+            let dropped_connection_state = self.take();
+            pool_manager.check_in(dropped_connection_state.into());
         }
     }
 }
@@ -351,7 +350,7 @@ impl From<DroppedConnectionState> for Connection {
             handler: state.handler.take(),
             stream_description: state.stream_description.take(),
             ready_and_available_time: None,
-            pool: None,
+            pool_manager: None,
         }
     }
 }

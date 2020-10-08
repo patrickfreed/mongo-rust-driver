@@ -1,6 +1,7 @@
 mod async_read_ext;
 mod async_write_ext;
 mod http;
+mod interval;
 mod join_handle;
 mod resolver;
 mod stream;
@@ -19,6 +20,7 @@ use crate::{
     options::StreamAddress,
 };
 pub(crate) use http::HttpClient;
+use interval::Interval;
 
 /// An abstract handle to the async runtime.
 #[derive(Clone, Copy, Debug)]
@@ -127,6 +129,11 @@ impl AsyncRuntime {
                 .await
                 .map_err(|_| ErrorKind::Io(std::io::ErrorKind::TimedOut.into()).into())
         }
+    }
+
+    pub(crate) fn interval(self, duration: Duration) -> Interval {
+        #[cfg(feature = "tokio-runtime")]
+        tokio::time::interval(duration)
     }
 
     pub(crate) async fn resolve_address(

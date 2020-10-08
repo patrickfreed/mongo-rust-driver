@@ -22,7 +22,13 @@ use std::{
 };
 
 pub use self::runner::{
-    run_v2_test, AnyTestOperation, OperationObject, RunOn, TestData, TestEvent, TestFile,
+    run_v2_test,
+    AnyTestOperation,
+    OperationObject,
+    RunOn,
+    TestData,
+    TestEvent,
+    TestFile,
 };
 
 use serde::de::DeserializeOwned;

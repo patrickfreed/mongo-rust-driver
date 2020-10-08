@@ -6,13 +6,14 @@ use std::{collections::HashMap, ops::Deref, sync::Arc, time::Duration};
 
 use futures::future::{BoxFuture, FutureExt};
 
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use self::{
     event::{Event, EventHandler},
     file::{Operation, TestFile},
 };
 
+use super::ConnectionPoolV2;
 use crate::{
     cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
     error::{Error, Result},
@@ -41,13 +42,14 @@ struct Executor {
 struct State {
     handler: Arc<EventHandler>,
     connections: RwLock<HashMap<String, Connection>>,
+    unlabeled_connections: Mutex<Vec<Connection>>,
     threads: RwLock<HashMap<String, AsyncJoinHandle<Result<()>>>>,
 
     // In order to drop the pool when performing a `close` operation, we use an `Option` so that we
     // can replace it with `None`. Since none of the tests should use the pool after its closed
     // (besides the ones we manually skip over), it's fine for us to `unwrap` the pool during these
     // tests, as panicking is sufficient to exit any aberrant test with a failure.
-    pool: RwLock<Option<ConnectionPool>>,
+    pool: RwLock<Option<ConnectionPoolV2>>,
 }
 
 impl State {
@@ -83,7 +85,7 @@ impl Executor {
             .get_or_insert_with(Default::default)
             .event_handler = Some(handler.clone());
 
-        let pool = ConnectionPool::new(
+        let pool = ConnectionPoolV2::new(
             CLIENT_OPTIONS.hosts[0].clone(),
             Default::default(),
             test_file.pool_options,
@@ -94,6 +96,7 @@ impl Executor {
             pool: RwLock::new(Some(pool)),
             connections: Default::default(),
             threads: Default::default(),
+            unlabeled_connections: Mutex::new(Default::default()),
         };
 
         Self {
@@ -220,7 +223,7 @@ impl Operation {
                         if let Some(label) = label {
                             state.connections.write().await.insert(label, conn);
                         } else {
-                            conn.pool.take();
+                            state.unlabeled_connections.lock().await.push(conn);
                         }
                     }
                 }
@@ -326,23 +329,23 @@ async fn cmap_spec_tests() {
 
         let _guard: RwLockReadGuard<()> = LOCK.run_concurrently().await;
 
-        let client = EventClient::new().await;
-        if let Some(ref run_on) = test_file.run_on {
-            let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
-            if !can_run_on {
-                println!("Skipping {}", test_file.description);
-                return;
-            }
-        }
+        // let client = EventClient::new().await;
+        // if let Some(ref run_on) = test_file.run_on {
+        //     let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
+        //     if !can_run_on {
+        //         println!("Skipping {}", test_file.description);
+        //         return;
+        //     }
+        // }
 
-        if let Some(ref fail_point) = test_file.fail_point {
-            println!("fp");
-            client
-                .database("admin")
-                .run_command(fail_point.clone(), None)
-                .await
-                .unwrap();
-        }
+        // if let Some(ref fail_point) = test_file.fail_point {
+        //     println!("fp");
+        //     client
+        //         .database("admin")
+        //         .run_command(fail_point.clone(), None)
+        //         .await
+        //         .unwrap();
+        // }
 
         let executor = Executor::new(test_file);
         executor.execute_test().await;
