@@ -6,8 +6,6 @@ mod connection_requester;
 mod establish;
 mod manager;
 pub(crate) mod options;
-#[allow(dead_code)]
-mod wait_queue;
 mod worker;
 
 use std::{collections::VecDeque, sync::Arc, time::Duration};
