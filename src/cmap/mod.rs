@@ -2,23 +2,17 @@
 mod test;
 
 pub(crate) mod conn;
+mod connection_requester;
 mod establish;
 pub(crate) mod options;
 #[allow(dead_code)]
 mod wait_queue;
 mod worker;
 
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use derivative::Derivative;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
@@ -30,15 +24,14 @@ use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
         CmapEventHandler, ConnectionCheckoutFailedEvent, ConnectionCheckoutFailedReason,
-        ConnectionCheckoutStartedEvent, ConnectionClosedReason, PoolClearedEvent, PoolClosedEvent,
-        PoolCreatedEvent,
+        ConnectionCheckoutStartedEvent, PoolCreatedEvent,
     },
     options::StreamAddress,
     runtime::HttpClient,
     RUNTIME,
 };
-use conn::PendingConnection;
-use worker::{ConnectionPoolWorker, ConnectionRequestResult, PoolManager};
+use connection_requester::{ConnectionRequester, RequestedConnection};
+use worker::{ConnectionPoolWorker, PoolManager};
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -49,8 +42,8 @@ const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 pub(crate) struct ConnectionPool {
     address: StreamAddress,
     manager: PoolManager,
-    check_out_sender: mpsc::UnboundedSender<oneshot::Sender<ConnectionRequestResult>>,
-    ref_count_sender: mpsc::Sender<()>,
+    connection_requester: ConnectionRequester,
+    worker_handle: mpsc::Sender<()>,
     wait_queue_timeout: Option<Duration>,
 
     #[derivative(Debug = "ignore")]
@@ -63,53 +56,11 @@ impl ConnectionPool {
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
     ) -> Self {
-        let establisher = ConnectionEstablisher::new(http_client, options.as_ref());
+        let (manager, connection_requester, handle) =
+            ConnectionPoolWorker::new(address.clone(), http_client, options.clone());
+
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
-
-        // The CMAP spec indicates that a max idle time of zero means that connections should not be
-        // closed due to idleness.
-        let mut max_idle_time = options.as_ref().and_then(|opts| opts.max_idle_time);
-        if max_idle_time == Some(Duration::from_millis(0)) {
-            max_idle_time = None;
-        }
-
-        let max_pool_size = options
-            .as_ref()
-            .and_then(|opts| opts.max_pool_size)
-            .unwrap_or(DEFAULT_MAX_POOL_SIZE);
-
-        let min_pool_size = options.as_ref().and_then(|opts| opts.min_pool_size);
         let wait_queue_timeout = options.as_ref().and_then(|opts| opts.wait_queue_timeout);
-
-        let connection_options: Option<ConnectionOptions> = options
-            .as_ref()
-            .map(|pool_options| ConnectionOptions::from(pool_options.clone()));
-
-        let (check_out_sender, request_receiver) = mpsc::unbounded_channel();
-        let (management_sender, management_receiver) = mpsc::unbounded_channel();
-        let (ref_count_sender, liveness_receiver) = mpsc::channel(1);
-
-        let inner = ConnectionPoolWorker {
-            address: address.clone(),
-            event_handler: event_handler.clone(),
-            max_idle_time,
-            min_pool_size,
-            establisher,
-            next_connection_id: 1,
-            total_connection_count: 0,
-            generation: 0,
-            connection_options,
-            available_connections: VecDeque::new(),
-            max_pool_size,
-            wait_queue_timeout,
-            request_receiver,
-            management_receiver,
-            management_sender: management_sender.clone(),
-            unfinished_check_out: None,
-            liveness_receiver,
-        };
-
-        inner.start();
 
         if let Some(ref handler) = event_handler {
             handler.handle_pool_created_event(PoolCreatedEvent {
@@ -120,13 +71,11 @@ impl ConnectionPool {
 
         Self {
             address,
-            manager: PoolManager {
-                sender: management_sender,
-            },
-            check_out_sender,
+            manager,
+            connection_requester,
             wait_queue_timeout,
             event_handler,
-            ref_count_sender,
+            worker_handle: handle,
         }
     }
 
@@ -145,8 +94,6 @@ impl ConnectionPool {
     /// blocks for longer than `wait_queue_timeout` waiting for an available connection or to
     /// start establishing a new one, a `WaitQueueTimeoutError` will be returned.
     pub(crate) async fn check_out(&self) -> Result<Connection> {
-        let (sender, receiver) = oneshot::channel();
-
         self.emit_event(|handler| {
             let event = ConnectionCheckoutStartedEvent {
                 address: self.address.clone(),
@@ -155,30 +102,34 @@ impl ConnectionPool {
             handler.handle_connection_checkout_started_event(event);
         });
 
-        let conn = match self.check_out_sender.send(sender) {
-            Ok(_) => {
-                let response = match self.wait_queue_timeout {
-                    Some(timeout) => RUNTIME
-                        .timeout(timeout, receiver)
-                        .await
-                        .map(|r| r.unwrap())
-                        .map_err(|_| {
-                            ErrorKind::WaitQueueTimeoutError {
-                                address: self.address.clone(),
-                            }
-                            .into()
-                        }),
-                    None => Ok(receiver.await.unwrap()),
-                };
+        let conn = self
+            .connection_requester
+            .request(self.wait_queue_timeout)
+            .await;
+        // let conn = match self.connection_requester.request().await {
+        //     Ok(_) => {
+        //         let response = match self.wait_queue_timeout {
+        //             Some(timeout) => RUNTIME
+        //                 .timeout(timeout, receiver)
+        //                 .await
+        //                 .map(|r| r.unwrap())
+        //                 .map_err(|_| {
+        //                     ErrorKind::WaitQueueTimeoutError {
+        //                         address: self.address.clone(),
+        //                     }
+        //                     .into()
+        //                 }),
+        //             None => Ok(receiver.await.unwrap()),
+        //         };
 
-                match response {
-                    Ok(ConnectionRequestResult::Pooled(c)) => Ok(c),
-                    Ok(ConnectionRequestResult::Establishing(task)) => task.await.unwrap(),
-                    Err(e) => Err(e),
-                }
-            }
-            Err(e) => panic!("woops {:?}", e),
-        };
+        //         match response {
+        //             Ok(RequestedConnection::Pooled(c)) => Ok(c),
+        //             Ok(RequestedConnection::Establishing(task)) => task.await.unwrap(),
+        //             Err(e) => Err(e),
+        //         }
+        //     }
+        //     Err(e) => panic!("woops {:?}", e),
+        // };
 
         match conn {
             Ok(ref conn) => {
