@@ -1,6 +1,6 @@
 use tokio::sync::{mpsc, oneshot};
 
-use super::Connection;
+use super::{worker::PoolWorkerHandle, Connection};
 use crate::error::{ErrorKind, Result};
 use crate::{options::StreamAddress, runtime::AsyncJoinHandle, RUNTIME};
 use std::time::Duration;
@@ -10,14 +10,22 @@ use std::time::Duration;
 pub(super) struct ConnectionRequester {
     address: StreamAddress,
     sender: mpsc::UnboundedSender<oneshot::Sender<RequestedConnection>>,
+    handle: PoolWorkerHandle,
 }
 
 impl ConnectionRequester {
     /// Returns a new requester/receiver pair.
-    pub(super) fn new(address: StreamAddress) -> (Self, ConnectionRequestReceiver) {
+    pub(super) fn new(
+        address: StreamAddress,
+        handle: PoolWorkerHandle,
+    ) -> (Self, ConnectionRequestReceiver) {
         let (sender, receiver) = mpsc::unbounded_channel();
         (
-            Self { address, sender },
+            Self {
+                address,
+                sender,
+                handle,
+            },
             ConnectionRequestReceiver { receiver },
         )
     }
@@ -28,29 +36,30 @@ impl ConnectionRequester {
     pub(super) async fn request(&self, wait_queue_timeout: Option<Duration>) -> Result<Connection> {
         let (sender, receiver) = oneshot::channel();
 
-        match self.sender.send(sender) {
-            Ok(_) => {
-                let response = match wait_queue_timeout {
-                    Some(timeout) => RUNTIME
-                        .timeout(timeout, receiver)
-                        .await
-                        .map(|r| r.unwrap())
-                        .map_err(|_| {
-                            ErrorKind::WaitQueueTimeoutError {
-                                address: self.address.clone(),
-                            }
-                            .into()
-                        }),
-                    None => Ok(receiver.await.unwrap()),
-                };
+        // this only errors if the receiver end is dropped, which can't happen because
+        // we own a handle to the worker, keeping it alive.
+        self.sender.send(sender).unwrap();
 
-                match response {
-                    Ok(RequestedConnection::Pooled(c)) => Ok(c),
-                    Ok(RequestedConnection::Establishing(task)) => task.await.unwrap(),
-                    Err(e) => Err(e),
-                }
-            }
-            Err(e) => panic!("woops {:?}", e),
+        // similarly, the receiver only returns an error if the sender is dropped, which
+        // can't happen due to the handle.
+        let response = match wait_queue_timeout {
+            Some(timeout) => RUNTIME
+                .timeout(timeout, receiver)
+                .await
+                .map(|r| r.unwrap())
+                .map_err(|_| {
+                    ErrorKind::WaitQueueTimeoutError {
+                        address: self.address.clone(),
+                    }
+                    .into()
+                }),
+            None => Ok(receiver.await.unwrap()),
+        };
+
+        match response {
+            Ok(RequestedConnection::Pooled(c)) => Ok(c),
+            Ok(RequestedConnection::Establishing(task)) => task.await,
+            Err(e) => Err(e),
         }
     }
 }

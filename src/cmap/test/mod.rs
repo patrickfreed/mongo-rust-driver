@@ -201,14 +201,9 @@ impl Operation {
                     state.threads.write().await.insert(target, task.unwrap());
                 }
                 Operation::Wait { ms } => RUNTIME.delay_for(Duration::from_millis(ms)).await,
-                Operation::WaitForThread { target } => state
-                    .threads
-                    .write()
-                    .await
-                    .remove(&target)
-                    .unwrap()
-                    .await
-                    .expect("polling the future should not fail")?,
+                Operation::WaitForThread { target } => {
+                    state.threads.write().await.remove(&target).unwrap().await?
+                }
                 Operation::WaitForEvent { event, count } => {
                     while state.count_events(&event) < count {
                         println!("waiting for {} {} events", count, event);

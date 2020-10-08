@@ -43,7 +43,6 @@ pub(crate) struct ConnectionPool {
     address: StreamAddress,
     manager: PoolManager,
     connection_requester: ConnectionRequester,
-    worker_handle: PoolWorkerHandle,
     wait_queue_timeout: Option<Duration>,
 
     #[derivative(Debug = "ignore")]
@@ -56,7 +55,7 @@ impl ConnectionPool {
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
     ) -> Self {
-        let (manager, connection_requester, handle) =
+        let (manager, connection_requester) =
             ConnectionPoolWorker::new(address.clone(), http_client, options.clone());
 
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
@@ -75,7 +74,6 @@ impl ConnectionPool {
             connection_requester,
             wait_queue_timeout,
             event_handler,
-            worker_handle: handle,
         }
     }
 

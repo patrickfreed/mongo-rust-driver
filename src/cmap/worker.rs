@@ -97,13 +97,14 @@ pub(crate) struct ConnectionPoolWorker {
 }
 
 impl ConnectionPoolWorker {
-    /// Starts a worker and returns a manager and connection requester, as well as a handle
-    /// to the worker. Once all handles are dropped, the work will cease execution.
+    /// Starts a worker and returns a manager and connection requester.
+    /// Once all connection requesters are dropped, the worker will stop executing
+    /// and close the pool.
     pub(super) fn new(
         address: StreamAddress,
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
-    ) -> (PoolManager, ConnectionRequester, PoolWorkerHandle) {
+    ) -> (PoolManager, ConnectionRequester) {
         let establisher = ConnectionEstablisher::new(http_client, options.as_ref());
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
 
@@ -125,9 +126,10 @@ impl ConnectionPoolWorker {
             .as_ref()
             .map(|pool_options| ConnectionOptions::from(pool_options.clone()));
 
-        let (connection_requester, request_receiver) = ConnectionRequester::new(address.clone());
-        let (manager, management_receiver) = PoolManager::new();
         let (handle_listener, handle) = HandleListener::new();
+        let (connection_requester, request_receiver) =
+            ConnectionRequester::new(address.clone(), handle);
+        let (manager, management_receiver) = PoolManager::new();
 
         let worker = ConnectionPoolWorker {
             address: address.clone(),
@@ -152,7 +154,7 @@ impl ConnectionPoolWorker {
             worker.execute().await;
         });
 
-        (manager, connection_requester, handle)
+        (manager, connection_requester)
     }
 
     /// Run the worker thread, listening on the various receivers until all handles have been dropped.
@@ -239,23 +241,30 @@ impl ConnectionPoolWorker {
                 let establisher = self.establisher.clone();
                 let pending_connection = self.create_pending_connection();
                 let manager = self.manager.clone();
-                let handle = RUNTIME
-                    .spawn(async move {
-                        let mut establish_result = establish_connection(
-                            &establisher,
-                            pending_connection,
-                            &manager,
-                            event_handler.as_ref(),
-                        )
-                        .await;
 
-                        if let Ok(ref mut c) = establish_result {
-                            c.mark_as_in_use(manager.clone());
-                        }
+                let handle = RUNTIME.spawn(async move {
+                    let mut establish_result = establish_connection(
+                        &establisher,
+                        pending_connection,
+                        &manager,
+                        event_handler.as_ref(),
+                    )
+                    .await;
 
-                        establish_result
-                    })
-                    .unwrap();
+                    if let Ok(ref mut c) = establish_result {
+                        c.mark_as_in_use(manager.clone());
+                    }
+
+                    establish_result
+                });
+
+                let handle = match handle {
+                    Some(h) => h,
+
+                    // The async runtime was dropped which means nothing will be waiting
+                    // on the request, so we can just exit.
+                    None => return,
+                };
 
                 // this will fail if the other end stopped listening, in which case
                 // we just let the connection establish in the background.
