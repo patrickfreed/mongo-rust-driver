@@ -4,6 +4,7 @@ mod test;
 pub(crate) mod conn;
 mod connection_requester;
 mod establish;
+mod manager;
 pub(crate) mod options;
 #[allow(dead_code)]
 mod wait_queue;
@@ -31,7 +32,8 @@ use crate::{
     RUNTIME,
 };
 use connection_requester::{ConnectionRequester, RequestedConnection};
-use worker::{ConnectionPoolWorker, PoolManager};
+use manager::PoolManager;
+use worker::{ConnectionPoolWorker, PoolWorkerHandle};
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -43,7 +45,7 @@ pub(crate) struct ConnectionPool {
     address: StreamAddress,
     manager: PoolManager,
     connection_requester: ConnectionRequester,
-    worker_handle: mpsc::Sender<()>,
+    worker_handle: PoolWorkerHandle,
     wait_queue_timeout: Option<Duration>,
 
     #[derivative(Debug = "ignore")]
@@ -106,30 +108,6 @@ impl ConnectionPool {
             .connection_requester
             .request(self.wait_queue_timeout)
             .await;
-        // let conn = match self.connection_requester.request().await {
-        //     Ok(_) => {
-        //         let response = match self.wait_queue_timeout {
-        //             Some(timeout) => RUNTIME
-        //                 .timeout(timeout, receiver)
-        //                 .await
-        //                 .map(|r| r.unwrap())
-        //                 .map_err(|_| {
-        //                     ErrorKind::WaitQueueTimeoutError {
-        //                         address: self.address.clone(),
-        //                     }
-        //                     .into()
-        //                 }),
-        //             None => Ok(receiver.await.unwrap()),
-        //         };
-
-        //         match response {
-        //             Ok(RequestedConnection::Pooled(c)) => Ok(c),
-        //             Ok(RequestedConnection::Establishing(task)) => task.await.unwrap(),
-        //             Err(e) => Err(e),
-        //         }
-        //     }
-        //     Err(e) => panic!("woops {:?}", e),
-        // };
 
         match conn {
             Ok(ref conn) => {
@@ -157,9 +135,11 @@ impl ConnectionPool {
         conn
     }
 
+    #[cfg(test)]
     pub(crate) async fn check_in(&self, conn: Connection) {
         self.manager.check_in(conn);
     }
+
     /// Increments the generation of the pool. Rather than eagerly removing stale connections from
     /// the pool, they are left for the background thread to clean up.
     pub(crate) fn clear(&self) {

@@ -6,17 +6,15 @@ use super::{
         ConnectionRequest, ConnectionRequestReceiver, ConnectionRequester, RequestedConnection,
     },
     establish::ConnectionEstablisher,
+    manager::{ManagementRequestReceiver, PoolManagementRequest, PoolManager},
     options::{ConnectionOptions, ConnectionPoolOptions},
     Connection, DEFAULT_MAX_POOL_SIZE,
 };
 use crate::{
     error::{Error, Result},
-    event::cmap::{
-        CmapEventHandler, ConnectionClosedReason, PoolClearedEvent, PoolClosedEvent,
-        PoolCreatedEvent,
-    },
+    event::cmap::{CmapEventHandler, ConnectionClosedReason, PoolClearedEvent, PoolClosedEvent},
     options::StreamAddress,
-    runtime::{AsyncJoinHandle, HttpClient},
+    runtime::HttpClient,
     RUNTIME,
 };
 
@@ -25,7 +23,7 @@ use std::{
     sync::{atomic::Ordering, Arc, Weak},
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 /// The internal state of a connection pool.
 #[derive(Derivative)]
@@ -81,14 +79,20 @@ pub(crate) struct ConnectionPoolWorker {
 
     /// Receiver used to determine if any threads hold references to this pool. If all the
     /// sender ends of this receiver drop, this worker will be notified and drop too.
-    liveness_receiver: mpsc::Receiver<()>,
+    handle_listener: HandleListener,
 
+    /// Receiver for incoming connection check out requests.
     request_receiver: ConnectionRequestReceiver,
 
-    management_receiver: mpsc::UnboundedReceiver<PoolManagementRequest>,
+    /// Receiver for incoming pool management requests (e.g. checking in a connection).
+    management_receiver: ManagementRequestReceiver,
 
-    management_sender: mpsc::UnboundedSender<PoolManagementRequest>,
+    /// A pool manager that can be cloned and attached to connections checked out of the pool.
+    manager: PoolManager,
 
+    /// An in-progress connection request that was not finished due to the pool being out of
+    /// available connections but at max_pool_size. When a connection is checked back in, it will be
+    /// used to fulfill this request before processing newer ones.
     unfinished_check_out: Option<ConnectionRequest>,
 }
 
@@ -99,7 +103,7 @@ impl ConnectionPoolWorker {
         address: StreamAddress,
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
-    ) -> (PoolManager, ConnectionRequester, mpsc::Sender<()>) {
+    ) -> (PoolManager, ConnectionRequester, PoolWorkerHandle) {
         let establisher = ConnectionEstablisher::new(http_client, options.as_ref());
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
 
@@ -122,8 +126,8 @@ impl ConnectionPoolWorker {
             .map(|pool_options| ConnectionOptions::from(pool_options.clone()));
 
         let (connection_requester, request_receiver) = ConnectionRequester::new(address.clone());
-        let (management_sender, management_receiver) = mpsc::unbounded_channel();
-        let (ref_count_sender, liveness_receiver) = mpsc::channel(1);
+        let (manager, management_receiver) = PoolManager::new();
+        let (handle_listener, handle) = HandleListener::new();
 
         let worker = ConnectionPoolWorker {
             address: address.clone(),
@@ -139,68 +143,64 @@ impl ConnectionPoolWorker {
             max_pool_size,
             request_receiver,
             management_receiver,
-            management_sender: management_sender.clone(),
+            manager: manager.clone(),
             unfinished_check_out: None,
-            liveness_receiver,
+            handle_listener,
         };
-        let manager = worker.manage();
-        worker.start();
 
-        (manager, connection_requester, ref_count_sender)
-    }
-
-    /// Get a manager for this pool which can be used to check in connections or clear the pool.
-    pub(super) fn manage(&self) -> PoolManager {
-        PoolManager {
-            sender: self.management_sender.clone(),
-        }
-    }
-
-    pub(super) fn start(mut self) {
         RUNTIME.execute(async move {
-            let mut maintenance_interval = RUNTIME.interval(Duration::from_millis(500));
+            worker.execute().await;
+        });
 
-            loop {
-                println!("worker: waiting for task");
-                let task = tokio::select! {
-                    Some(result_sender) = self.request_receiver.recv(),
-                                          if self.unfinished_check_out.is_none() => PoolTask::CheckOut(result_sender),
-                    Some(request) = self.management_receiver.recv() => request.into(),
-                    None = self.liveness_receiver.recv() => {
-                        // all sender ends of the liveness receiver dropped, meaning this
-                        // pool has no more references.
-                        break
-                    },
-                    _ = maintenance_interval.tick() => {
-                        PoolTask::Maintenance
-                    },
-                    else => {
-                        println!("worker: breaking worker");
-                        break
-                    }
-                };
-                println!("worker: got {:?}", task);
+        (manager, connection_requester, handle)
+    }
 
-                match task {
-                    PoolTask::CheckOut(result_sender) => self.check_out(result_sender).await,
-                    PoolTask::CheckIn(connection) => self.check_in(connection),
-                    PoolTask::Clear => self.clear(),
-                    PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
-                    PoolTask::Maintenance => self.perform_maintenance(),
-                    PoolTask::Populate(connection) => self.populate_connection(connection),
+    /// Run the worker thread, listening on the various receivers until all handles have been dropped.
+    /// Once all handles are dropped, the pool will close any available connections and
+    /// emit a pool closed event.
+    async fn execute(mut self) {
+        let mut maintenance_interval = RUNTIME.interval(Duration::from_millis(500));
+
+        loop {
+            println!("worker: waiting for task");
+            let task = tokio::select! {
+                Some(result_sender) = self.request_receiver.recv(),
+                                      if self.unfinished_check_out.is_none() => PoolTask::CheckOut(result_sender),
+                Some(request) = self.management_receiver.recv() => request.into(),
+                _ = self.handle_listener.listen() => {
+                    // all worker handles have been dropped meaning this
+                    // pool has no more references and can be dropped itself.
+                    break
+                },
+                _ = maintenance_interval.tick() => {
+                    PoolTask::Maintenance
+                },
+                else => {
+                    println!("worker: breaking worker");
+                    break
                 }
-            }
+            };
+            println!("worker: got {:?}", task);
 
-            while let Some(connection) = self.available_connections.pop_front() {
-                connection.close_and_drop(ConnectionClosedReason::PoolClosed);
+            match task {
+                PoolTask::CheckOut(result_sender) => self.check_out(result_sender).await,
+                PoolTask::CheckIn(connection) => self.check_in(connection),
+                PoolTask::Clear => self.clear(),
+                PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
+                PoolTask::Maintenance => self.perform_maintenance(),
+                PoolTask::Populate(connection) => self.populate_connection(connection),
             }
+        }
 
-            self.emit_event(|handler| {
-                handler.handle_pool_closed_event(PoolClosedEvent {
-                    address: self.address.clone(),
-                });
+        while let Some(connection) = self.available_connections.pop_front() {
+            connection.close_and_drop(ConnectionClosedReason::PoolClosed);
+        }
+
+        self.emit_event(|handler| {
+            handler.handle_pool_closed_event(PoolClosedEvent {
+                address: self.address.clone(),
             });
-        })
+        });
     }
 
     async fn check_out(&mut self, request: ConnectionRequest) {
@@ -238,7 +238,7 @@ impl ConnectionPoolWorker {
                 let event_handler = self.event_handler.clone();
                 let establisher = self.establisher.clone();
                 let pending_connection = self.create_pending_connection();
-                let manager = self.manage();
+                let manager = self.manager.clone();
                 let handle = RUNTIME
                     .spawn(async move {
                         let mut establish_result = establish_connection(
@@ -392,9 +392,7 @@ impl ConnectionPoolWorker {
             while self.total_connection_count < min_pool_size {
                 let pending_connection = self.create_pending_connection();
                 let event_handler = self.event_handler.clone();
-                let manager = PoolManager {
-                    sender: self.management_sender.clone(),
-                };
+                let manager = self.manager.clone();
                 let establisher = self.establisher.clone();
                 RUNTIME.execute(async move {
                     let connection = establish_connection(
@@ -436,13 +434,25 @@ async fn establish_connection(
     establish_result
 }
 
+/// Task to process by the worker.
 #[derive(Debug)]
 enum PoolTask {
+    /// Clear the pool.
     Clear,
+
+    /// Check in the given connection.
     CheckIn(Connection),
+
+    /// Fulfill the given connection request.
     CheckOut(ConnectionRequest),
+
+    /// Add this new connection to the pool without emitting events.
     Populate(Connection),
+
+    /// Update the pool state based on the given establishment error.
     HandleConnectionFailed(Error),
+
+    /// Perform pool maintenance (ensure min connections, remove stale or idle connections).
     Maintenance,
 }
 
@@ -459,36 +469,29 @@ impl From<PoolManagementRequest> for PoolTask {
     }
 }
 
-pub(super) enum PoolManagementRequest {
-    Clear,
-    Populate(Connection),
-    CheckIn(Connection),
-    HandleConnectionFailed(Error),
+/// Handle to the worker. Once all handles have been dropped, the worker
+/// will stop waiting for new requests and drop the pool itself.
+#[derive(Debug, Clone)]
+pub(super) struct PoolWorkerHandle {
+    sender: mpsc::Sender<()>,
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct PoolManager {
-    pub(super) sender: mpsc::UnboundedSender<PoolManagementRequest>,
+/// Listener used to determine when all handles have been dropped.
+#[derive(Debug)]
+struct HandleListener {
+    receiver: mpsc::Receiver<()>,
 }
 
-impl PoolManager {
-    pub(super) fn clear(&self) {
-        let _ = self.sender.send(PoolManagementRequest::Clear);
+impl HandleListener {
+    fn new() -> (Self, PoolWorkerHandle) {
+        let (sender, receiver) = mpsc::channel(1);
+        (Self { receiver }, PoolWorkerHandle { sender })
     }
 
-    pub(super) fn check_in(&self, connection: Connection) {
-        let _ = self.sender.send(PoolManagementRequest::CheckIn(connection));
-    }
-
-    fn handle_connection_failed(&self, error: Error) {
-        let _ = self
-            .sender
-            .send(PoolManagementRequest::HandleConnectionFailed(error));
-    }
-
-    fn populate_connection(&self, connection: Connection) {
-        let _ = self
-            .sender
-            .send(PoolManagementRequest::Populate(connection));
+    /// Listen until all handles are dropped.
+    /// This will not return until all handles are dropped, so make sure to only poll this via select
+    /// or with a timeout.
+    async fn listen(&mut self) {
+        self.receiver.recv().await;
     }
 }
