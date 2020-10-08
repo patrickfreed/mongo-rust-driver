@@ -10,7 +10,7 @@ use std::{
 use derivative::Derivative;
 
 use self::wire::Message;
-use super::worker::PoolManager;
+use super::manager::PoolManager;
 use crate::{
     cmap::options::{ConnectionOptions, StreamOptions},
     error::{ErrorKind, Result},
@@ -259,10 +259,10 @@ impl Connection {
         }
     }
 
-    /// Nullify the inner state and return it in a `DroppedConnectionState` for checking back in to
-    /// the pool in a background task.
-    fn take(&mut self) -> DroppedConnectionState {
-        DroppedConnectionState {
+    /// Nullify the inner state and return it in a new `Connection` for checking back in to
+    /// the pool.
+    fn take(&mut self) -> Connection {
+        Connection {
             id: self.id,
             address: self.address.clone(),
             generation: self.generation,
@@ -270,6 +270,8 @@ impl Connection {
             handler: self.handler.take(),
             stream_description: self.stream_description.take(),
             command_executing: self.command_executing,
+            pool_manager: self.pool_manager.take(),
+            ready_and_available_time: self.ready_and_available_time,
         }
     }
 }
@@ -282,66 +284,17 @@ impl Drop for Connection {
         // itself and emit a ConnectionClosed event (because the `close_and_drop`
         // helper was not called explicitly).
         //
-        // If the connection does not have a weak reference to a pool, then the connection is
+        // If the connection does not have a pool manager, then the connection is
         // being dropped while it's not checked out. This means that the pool called
         // the `close_and_drop` helper explicitly, so we don't add it back to the
         // pool or emit any events.
         if let Some(pool_manager) = self.pool_manager.take() {
-            let dropped_connection_state = self.take();
-            pool_manager.check_in(dropped_connection_state.into());
-        }
-    }
-}
-
-/// Struct encapsulating the state of a connection that has been dropped.
-///
-/// Because `Drop::drop` cannot be async, we package the internal state of a dropped connection into
-/// this struct, and move it into an async task that will attempt to check the reconstructed
-/// connection back into the pool.
-///
-/// If the async runtime has been dropped, that task will not execute, and this state will be
-/// dropped. From there, we simply emit a connection closed event and do not attempt to reconstruct
-/// the `Connection`.
-#[derive(Derivative)]
-#[derivative(Debug)]
-struct DroppedConnectionState {
-    pub(super) id: u32,
-    pub(super) address: StreamAddress,
-    pub(super) generation: u32,
-    stream: AsyncStream,
-    #[derivative(Debug = "ignore")]
-    handler: Option<Arc<dyn CmapEventHandler>>,
-    stream_description: Option<StreamDescription>,
-    command_executing: bool,
-}
-
-impl Drop for DroppedConnectionState {
-    /// If this drop is called, that means the async runtime itself was dropped before the
-    /// connection could be checked back in to the pool. Instead of checking back into the pool
-    /// again, we just close the connection directly.
-    fn drop(&mut self) {
-        if let Some(ref handler) = self.handler {
-            handler.handle_connection_closed_event(ConnectionClosedEvent {
-                address: self.address.clone(),
-                connection_id: self.id,
-                reason: ConnectionClosedReason::PoolClosed,
-            });
-        }
-    }
-}
-
-impl From<DroppedConnectionState> for Connection {
-    fn from(mut state: DroppedConnectionState) -> Self {
-        Self {
-            id: state.id,
-            address: state.address.clone(),
-            generation: state.generation,
-            command_executing: state.command_executing,
-            stream: std::mem::replace(&mut state.stream, AsyncStream::Null),
-            handler: state.handler.take(),
-            stream_description: state.stream_description.take(),
-            ready_and_available_time: None,
-            pool_manager: None,
+            let dropped_connection = self.take();
+            if let Err(mut conn) = pool_manager.check_in(dropped_connection) {
+                // the check in failed because the pool has been dropped, so we emit the event
+                // here and drop the connection.
+                conn.close(ConnectionClosedReason::PoolClosed);
+            }
         }
     }
 }
