@@ -4,7 +4,7 @@ use tokio::sync::RwLockReadGuard;
 use super::event::{Event, EventHandler};
 use crate::{
     bson::doc,
-    cmap::{options::ConnectionPoolOptions, Command, ConnectionPool, ConnectionPoolV2},
+    cmap::{options::ConnectionPoolOptions, Command, ConnectionPool},
     selection_criteria::ReadPreference,
     test::{TestClient, CLIENT_OPTIONS, LOCK},
     RUNTIME,
@@ -30,7 +30,7 @@ async fn acquire_connection_and_send_command() {
     let client_options = CLIENT_OPTIONS.clone();
     let pool_options = ConnectionPoolOptions::from_client_options(&client_options);
 
-    let pool = ConnectionPoolV2::new(
+    let pool = ConnectionPool::new(
         client_options.hosts[0].clone(),
         Default::default(),
         Some(pool_options),
@@ -94,7 +94,7 @@ async fn concurrent_connections() {
     let client_options = CLIENT_OPTIONS.clone();
     let mut options = ConnectionPoolOptions::from_client_options(&client_options);
     options.event_handler = Some(handler.clone() as Arc<dyn crate::cmap::CmapEventHandler>);
-    let pool = ConnectionPoolV2::new(
+    let pool = ConnectionPool::new(
         CLIENT_OPTIONS.hosts[0].clone(),
         Default::default(),
         Some(options),

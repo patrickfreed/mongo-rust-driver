@@ -1,19 +1,13 @@
 use derivative::Derivative;
 
 use super::{
-    conn::PendingConnection,
-    establish::ConnectionEstablisher,
-    options::ConnectionOptions,
+    conn::PendingConnection, establish::ConnectionEstablisher, options::ConnectionOptions,
     Connection,
-    ConnectionPoolInner,
 };
 use crate::{
     error::{Error, Result},
     event::cmap::{
-        CmapEventHandler,
-        ConnectionClosedReason,
-        PoolClearedEvent,
-        PoolClosedEvent,
+        CmapEventHandler, ConnectionClosedReason, PoolClearedEvent, PoolClosedEvent,
         PoolCreatedEvent,
     },
     options::StreamAddress,
@@ -163,7 +157,7 @@ impl ConnectionPoolWorker {
                                         .await;
 
                                         if let Ok(ref mut c) = establish_result {
-                                            c.mark_as_in_use_v2(manager.clone());
+                                            c.mark_as_in_use(manager.clone());
                                         }
 
                                         establish_result

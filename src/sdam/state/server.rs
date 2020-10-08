@@ -1,5 +1,5 @@
 use crate::{
-    cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool, ConnectionPoolV2},
+    cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
     error::Result,
     options::{ClientOptions, StreamAddress},
     runtime::HttpClient,
@@ -11,7 +11,7 @@ pub(crate) struct Server {
     pub(crate) address: StreamAddress,
 
     /// The connection pool for the server.
-    pool: ConnectionPoolV2,
+    pool: ConnectionPool,
 }
 
 impl Server {
@@ -21,7 +21,7 @@ impl Server {
         http_client: HttpClient,
     ) -> Self {
         Self {
-            pool: ConnectionPoolV2::new(
+            pool: ConnectionPool::new(
                 address.clone(),
                 http_client,
                 Some(ConnectionPoolOptions::from_client_options(options)),

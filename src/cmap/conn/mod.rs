@@ -10,17 +10,13 @@ use std::{
 use derivative::Derivative;
 
 use self::wire::Message;
-use super::{worker::PoolManager, ConnectionPoolInner};
+use super::worker::PoolManager;
 use crate::{
     cmap::options::{ConnectionOptions, StreamOptions},
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler,
-        ConnectionCheckedInEvent,
-        ConnectionCheckedOutEvent,
-        ConnectionClosedEvent,
-        ConnectionClosedReason,
-        ConnectionCreatedEvent,
+        CmapEventHandler, ConnectionCheckedInEvent, ConnectionCheckedOutEvent,
+        ConnectionClosedEvent, ConnectionClosedReason, ConnectionCreatedEvent,
         ConnectionReadyEvent,
     },
     options::{StreamAddress, TlsOptions},
@@ -160,12 +156,7 @@ impl Connection {
     /// Helper to mark that the connection has been checked out of the pool. This ensures that the
     /// connection is not marked as idle based on the time that it's checked out and that it has a
     /// reference to the pool.
-    pub(super) fn mark_as_in_use(&mut self, pool: Weak<ConnectionPoolInner>) {
-        // self.pool = Some(pool);
-        self.ready_and_available_time.take();
-    }
-
-    pub(super) fn mark_as_in_use_v2(&mut self, manager: PoolManager) {
+    pub(super) fn mark_as_in_use(&mut self, manager: PoolManager) {
         self.pool_manager = Some(manager);
         self.ready_and_available_time.take();
     }

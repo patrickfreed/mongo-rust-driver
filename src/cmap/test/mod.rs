@@ -13,7 +13,6 @@ use self::{
     file::{Operation, TestFile},
 };
 
-use super::ConnectionPoolV2;
 use crate::{
     cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
     error::{Error, Result},
@@ -49,7 +48,7 @@ struct State {
     // can replace it with `None`. Since none of the tests should use the pool after its closed
     // (besides the ones we manually skip over), it's fine for us to `unwrap` the pool during these
     // tests, as panicking is sufficient to exit any aberrant test with a failure.
-    pool: RwLock<Option<ConnectionPoolV2>>,
+    pool: RwLock<Option<ConnectionPool>>,
 }
 
 impl State {
@@ -85,7 +84,7 @@ impl Executor {
             .get_or_insert_with(Default::default)
             .event_handler = Some(handler.clone());
 
-        let pool = ConnectionPoolV2::new(
+        let pool = ConnectionPool::new(
             CLIENT_OPTIONS.hosts[0].clone(),
             Default::default(),
             test_file.pool_options,
