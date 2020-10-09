@@ -164,22 +164,35 @@ impl ConnectionPoolWorker {
         let mut maintenance_interval = RUNTIME.interval(Duration::from_millis(500));
 
         loop {
-            println!("worker: waiting for task");
-            let task = tokio::select! {
-                Some(result_sender) = self.request_receiver.recv(),
-                                      if self.unfinished_check_out.is_none() => PoolTask::CheckOut(result_sender),
-                Some(request) = self.management_receiver.recv() => request.into(),
-                _ = self.handle_listener.listen() => {
-                    // all worker handles have been dropped meaning this
-                    // pool has no more references and can be dropped itself.
-                    break
-                },
-                _ = maintenance_interval.tick() => {
-                    PoolTask::Maintenance
-                },
-                else => {
-                    println!("worker: breaking worker");
-                    break
+            println!(
+                "worker {}: waiting for task {}",
+                self.address,
+                self.unfinished_check_out.is_some()
+            );
+            // If there's an outstanding request and we can serve it, do so. Otherwise poll
+            // for a new request
+            let task = if self.unfinished_check_out.is_some()
+                && self.can_service_connection_request()
+            {
+                PoolTask::CheckOut(self.unfinished_check_out.take().unwrap())
+            } else {
+                tokio::select! {
+                    Some(result_sender) = self.request_receiver.recv(),
+                                        if self.unfinished_check_out.is_none() => PoolTask::CheckOut(result_sender),
+                    Some(request) = self.management_receiver.recv() => request.into(),
+                    _ = self.handle_listener.listen() => {
+                        println!("breaking!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                        // all worker handles have been dropped meaning this
+                        // pool has no more references and can be dropped itself.
+                        break
+                    },
+                    _ = maintenance_interval.tick() => {
+                        PoolTask::Maintenance
+                    },
+                    else => {
+                        println!("worker: breaking worker");
+                        break
+                    }
                 }
             };
             println!("worker: got {:?}", task);
@@ -194,6 +207,7 @@ impl ConnectionPoolWorker {
             }
         }
 
+        println!("worker: pool shutting down");
         while let Some(connection) = self.available_connections.pop_front() {
             connection.close_and_drop(ConnectionClosedReason::PoolClosed);
         }
@@ -203,6 +217,10 @@ impl ConnectionPoolWorker {
                 address: self.address.clone(),
             });
         });
+    }
+
+    fn can_service_connection_request(&self) -> bool {
+        self.total_connection_count < self.max_pool_size || !self.available_connections.is_empty()
     }
 
     async fn check_out(&mut self, request: ConnectionRequest) {
@@ -225,15 +243,14 @@ impl ConnectionPoolWorker {
         }
 
         match connection {
-            Some(conn) => {
-                match request.fulfill(RequestedConnection::Pooled(conn)) {
-                    Ok(_) => return,
-                    Err(result) => {
-                        // thread stopped listening, indicating it hit the WaitQueue
-                        // timeout.
-                        self.available_connections
-                            .push_back(result.unwrap_pooled_connection());
-                    }
+            Some(mut conn) => {
+                conn.mark_as_in_use(self.manager.clone());
+                if let Err(request) = request.fulfill(RequestedConnection::Pooled(conn)) {
+                    // checking out thread stopped listening, indicating it hit the WaitQueue
+                    // timeout, so we put connection back into pool.
+                    let mut connection = request.unwrap_pooled_connection();
+                    connection.mark_as_available();
+                    self.available_connections.push_back(connection);
                 }
             }
             None if self.total_connection_count < self.max_pool_size => {
@@ -263,12 +280,16 @@ impl ConnectionPoolWorker {
 
                     // The async runtime was dropped which means nothing will be waiting
                     // on the request, so we can just exit.
-                    None => return,
+                    None => {
+                        println!("runtime dropped");
+                        return;
+                    }
                 };
 
-                // this will fail if the other end stopped listening, in which case
+                // this only fails if the other end stopped listening (e.g. due to timeout), in which case
                 // we just let the connection establish in the background.
-                let _ = request.fulfill(RequestedConnection::Establishing(handle));
+                let _: std::result::Result<_, _> =
+                    request.fulfill(RequestedConnection::Establishing(handle));
             }
             None => self.unfinished_check_out = Some(request),
         }
@@ -314,17 +335,7 @@ impl ConnectionPoolWorker {
         } else if conn.is_executing() {
             self.close_connection(conn, ConnectionClosedReason::Dropped)
         } else {
-            match self.unfinished_check_out.take() {
-                Some(result_sender) => {
-                    if let Err(conn) = result_sender.fulfill(RequestedConnection::Pooled(conn)) {
-                        self.available_connections
-                            .push_back(conn.unwrap_pooled_connection());
-                    }
-                }
-                None => {
-                    self.available_connections.push_back(conn);
-                }
-            }
+            self.available_connections.push_back(conn);
         }
     }
 
@@ -367,32 +378,18 @@ impl ConnectionPoolWorker {
 
     /// Iterate over the connections and remove any that are stale or idle.
     fn remove_perished_connections(&mut self) {
-        // re-acquire the lock between loop iterations to allow other threads to use the pool.
-        loop {
-            if self.available_connections.len() == 0 {
+        while let Some(connection) = self.available_connections.pop_front() {
+            if connection.is_stale(self.generation) {
+                // the following unwrap is okay becaue we asserted the pool was nonempty
+                self.close_connection(connection, ConnectionClosedReason::Stale);
+            } else if connection.is_idle(self.max_idle_time) {
+                self.close_connection(connection, ConnectionClosedReason::Idle);
+            } else {
+                self.available_connections.push_front(connection);
+                // All subsequent connections are either not idle or not stale since they were
+                // checked into the pool later, so we can just quit early.
                 break;
-            }
-
-            let (connection, close_reason) =
-                if self.available_connections[0].is_stale(self.generation) {
-                    // the following unwrap is okay becaue we asserted the pool was nonempty
-                    (
-                        self.available_connections.pop_front().unwrap(),
-                        ConnectionClosedReason::Stale,
-                    )
-                } else if self.available_connections[0].is_idle(self.max_idle_time) {
-                    // the following unwrap is okay becaue we asserted the pool was nonempty
-                    (
-                        self.available_connections.pop_front().unwrap(),
-                        ConnectionClosedReason::Idle,
-                    )
-                } else {
-                    // All subsequent connections are either not idle or not stale since they were
-                    // checked into the pool later, so we can just quit early.
-                    break;
-                };
-
-            self.close_connection(connection, close_reason);
+            };
         }
     }
 
@@ -483,6 +480,12 @@ impl From<PoolManagementRequest> for PoolTask {
 #[derive(Debug, Clone)]
 pub(super) struct PoolWorkerHandle {
     sender: mpsc::Sender<()>,
+}
+
+impl Drop for PoolWorkerHandle {
+    fn drop(&mut self) {
+        println!("handle drop")
+    }
 }
 
 /// Listener used to determine when all handles have been dropped.

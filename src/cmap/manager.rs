@@ -38,7 +38,7 @@ impl PoolManager {
     pub(crate) fn check_in(&self, connection: Connection) -> std::result::Result<(), Connection> {
         if let Err(request) = self.sender.send(PoolManagementRequest::CheckIn(connection)) {
             let conn = request.0.unwrap_check_in();
-            // let handler =
+            return Err(conn);
         }
         Ok(())
     }

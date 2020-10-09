@@ -211,10 +211,14 @@ impl Operation {
                     }
                 }
                 Operation::CheckOut { label } => {
+                    println!("getting lock for check out {:?}", label);
                     if let Some(pool) = state.pool.read().await.deref() {
+                        println!("got lock, checking out {:?}", label);
                         let mut conn = pool.check_out().await?;
+                        println!("checked out! {:?}", label);
 
                         if let Some(label) = label {
+                            println!("checked out {}", label);
                             state.connections.write().await.insert(label, conn);
                         } else {
                             state.unlabeled_connections.lock().await.push(conn);
@@ -222,11 +226,14 @@ impl Operation {
                     }
                 }
                 Operation::CheckIn { connection } => {
+                    println!("checking in {}", connection);
                     let conn = state.connections.write().await.remove(&connection).unwrap();
+                    drop(conn);
 
-                    if let Some(pool) = state.pool.read().await.deref() {
-                        pool.check_in(conn).await;
-                    }
+                    // if let Some(pool) = state.pool.read().await.deref() {
+                    //     pool.check_in(conn).await;
+                    // }
+                    RUNTIME.delay_for(Duration::from_millis(100)).await;
                 }
                 Operation::Clear => {
                     if let Some(pool) = state.pool.write().await.deref() {
