@@ -10,8 +10,11 @@ mod stream;
 use std::{future::Future, net::SocketAddr, time::Duration};
 
 pub(crate) use self::{
-    async_read_ext::AsyncLittleEndianRead, async_write_ext::AsyncLittleEndianWrite,
-    join_handle::AsyncJoinHandle, resolver::AsyncResolver, stream::AsyncStream,
+    async_read_ext::AsyncLittleEndianRead,
+    async_write_ext::AsyncLittleEndianWrite,
+    join_handle::AsyncJoinHandle,
+    resolver::AsyncResolver,
+    stream::AsyncStream,
 };
 use crate::{
     error::{ErrorKind, Result},

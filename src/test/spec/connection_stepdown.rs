@@ -7,11 +7,18 @@ use crate::{
     bson::doc,
     error::{CommandError, ErrorKind},
     options::{
-        Acknowledgment, ClientOptions, CreateCollectionOptions, DropCollectionOptions, FindOptions,
-        InsertManyOptions, WriteConcern,
+        Acknowledgment,
+        ClientOptions,
+        CreateCollectionOptions,
+        DropCollectionOptions,
+        FindOptions,
+        InsertManyOptions,
+        WriteConcern,
     },
     test::{util::EventClient, TestClient, LOCK},
-    Collection, Database, RUNTIME,
+    Collection,
+    Database,
+    RUNTIME,
 };
 
 async fn run_test<F: Future>(name: &str, test: impl Fn(EventClient, Database, Collection) -> F) {

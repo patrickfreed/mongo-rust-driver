@@ -1,8 +1,12 @@
 use tokio::sync::{mpsc, oneshot};
 
 use super::{worker::PoolWorkerHandle, Connection};
-use crate::error::{ErrorKind, Result};
-use crate::{options::StreamAddress, runtime::AsyncJoinHandle, RUNTIME};
+use crate::{
+    error::{ErrorKind, Result},
+    options::StreamAddress,
+    runtime::AsyncJoinHandle,
+    RUNTIME,
+};
 use std::time::Duration;
 
 /// Handle for requesting Connections from the pool.

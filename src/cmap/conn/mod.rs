@@ -3,7 +3,7 @@ mod stream_description;
 mod wire;
 
 use std::{
-    sync::{Arc, Weak},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -15,13 +15,16 @@ use crate::{
     cmap::options::{ConnectionOptions, StreamOptions},
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler, ConnectionCheckedInEvent, ConnectionCheckedOutEvent,
-        ConnectionClosedEvent, ConnectionClosedReason, ConnectionCreatedEvent,
+        CmapEventHandler,
+        ConnectionCheckedInEvent,
+        ConnectionCheckedOutEvent,
+        ConnectionClosedEvent,
+        ConnectionClosedReason,
+        ConnectionCreatedEvent,
         ConnectionReadyEvent,
     },
     options::{StreamAddress, TlsOptions},
     runtime::AsyncStream,
-    RUNTIME,
 };
 pub(crate) use command::{Command, CommandResponse};
 pub(crate) use stream_description::StreamDescription;

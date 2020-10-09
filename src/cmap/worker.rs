@@ -3,12 +3,16 @@ use derivative::Derivative;
 use super::{
     conn::PendingConnection,
     connection_requester::{
-        ConnectionRequest, ConnectionRequestReceiver, ConnectionRequester, RequestedConnection,
+        ConnectionRequest,
+        ConnectionRequestReceiver,
+        ConnectionRequester,
+        RequestedConnection,
     },
     establish::ConnectionEstablisher,
     manager::{ManagementRequestReceiver, PoolManagementRequest, PoolManager},
     options::{ConnectionOptions, ConnectionPoolOptions},
-    Connection, DEFAULT_MAX_POOL_SIZE,
+    Connection,
+    DEFAULT_MAX_POOL_SIZE,
 };
 use crate::{
     error::{Error, Result},
@@ -18,11 +22,7 @@ use crate::{
     RUNTIME,
 };
 
-use std::{
-    collections::VecDeque,
-    sync::{atomic::Ordering, Arc, Weak},
-    time::Duration,
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
 /// The internal state of a connection pool.
@@ -72,9 +72,9 @@ pub(crate) struct ConnectionPoolWorker {
     min_pool_size: Option<u32>,
 
     /// The maximum number of connections that the pool can manage, including connections checked
-    /// out of the pool. If a thread requests a connection and the pool is empty + there are already
-    /// max_pool_size connections in use, it will block until one is returned or the wait_queue_timeout
-    /// is exceeded.
+    /// out of the pool. If a thread requests a connection and the pool is empty + there are
+    /// already max_pool_size connections in use, it will block until one is returned or the
+    /// wait_queue_timeout is exceeded.
     max_pool_size: u32,
 
     /// Receiver used to determine if any threads hold references to this pool. If all the
@@ -91,8 +91,8 @@ pub(crate) struct ConnectionPoolWorker {
     manager: PoolManager,
 
     /// An in-progress connection request that was not finished due to the pool being out of
-    /// available connections but at max_pool_size. When a connection is checked back in, it will be
-    /// used to fulfill this request before processing newer ones.
+    /// available connections but at max_pool_size. When a connection is checked back in, it will
+    /// be used to fulfill this request before processing newer ones.
     unfinished_check_out: Option<ConnectionRequest>,
 }
 
@@ -157,8 +157,8 @@ impl ConnectionPoolWorker {
         (manager, connection_requester)
     }
 
-    /// Run the worker thread, listening on the various receivers until all handles have been dropped.
-    /// Once all handles are dropped, the pool will close any available connections and
+    /// Run the worker thread, listening on the various receivers until all handles have been
+    /// dropped. Once all handles are dropped, the pool will close any available connections and
     /// emit a pool closed event.
     async fn execute(mut self) {
         let mut maintenance_interval = RUNTIME.interval(Duration::from_millis(500));
@@ -286,8 +286,9 @@ impl ConnectionPoolWorker {
                     }
                 };
 
-                // this only fails if the other end stopped listening (e.g. due to timeout), in which case
-                // we just let the connection establish in the background.
+                // this only fails if the other end stopped listening (e.g. due to timeout), in
+                // which case we just let the connection establish in the
+                // background.
                 let _: std::result::Result<_, _> =
                     request.fulfill(RequestedConnection::Establishing(handle));
             }
@@ -501,8 +502,8 @@ impl HandleListener {
     }
 
     /// Listen until all handles are dropped.
-    /// This will not return until all handles are dropped, so make sure to only poll this via select
-    /// or with a timeout.
+    /// This will not return until all handles are dropped, so make sure to only poll this via
+    /// select or with a timeout.
     async fn listen(&mut self) {
         self.receiver.recv().await;
     }

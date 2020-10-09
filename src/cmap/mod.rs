@@ -8,30 +8,28 @@ mod manager;
 pub(crate) mod options;
 mod worker;
 
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use derivative::Derivative;
-use tokio::sync::{mpsc, oneshot};
 
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
-use self::{
-    establish::ConnectionEstablisher,
-    options::{ConnectionOptions, ConnectionPoolOptions},
-};
+use self::options::ConnectionPoolOptions;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler, ConnectionCheckoutFailedEvent, ConnectionCheckoutFailedReason,
-        ConnectionCheckoutStartedEvent, PoolCreatedEvent,
+        CmapEventHandler,
+        ConnectionCheckoutFailedEvent,
+        ConnectionCheckoutFailedReason,
+        ConnectionCheckoutStartedEvent,
+        PoolCreatedEvent,
     },
     options::StreamAddress,
     runtime::HttpClient,
-    RUNTIME,
 };
-use connection_requester::{ConnectionRequester, RequestedConnection};
+use connection_requester::ConnectionRequester;
 use manager::PoolManager;
-use worker::{ConnectionPoolWorker, PoolWorkerHandle};
+use worker::ConnectionPoolWorker;
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -142,29 +140,3 @@ impl ConnectionPool {
         self.manager.clear();
     }
 }
-
-// impl Drop for ConnectionPoolInner {
-//     /// Automatic cleanup for the connection pool. This is defined on `ConnectionPoolInner` rather
-//     /// than `ConnectionPool` so that it only gets run once all (non-weak) references to the
-//     /// `ConnectionPoolInner` are dropped.
-//     fn drop(&mut self) {
-//         let address = self.address.clone();
-//         let available_connections =
-//             std::mem::replace(&mut self.available_connections, Mutex::new(VecDeque::new()));
-//         let event_handler = self.event_handler.clone();
-
-//         RUNTIME.execute(async move {
-//             // this lock attempt will always immediately succeed.
-//             let mut available_connections = available_connections.lock().await;
-//             while let Some(connection) = available_connections.pop_front() {
-//                 connection.close_and_drop(ConnectionClosedReason::PoolClosed);
-//             }
-
-//             if let Some(ref handler) = event_handler {
-//                 handler.handle_pool_closed_event(PoolClosedEvent {
-//                     address: address.clone(),
-//                 });
-//             }
-//         });
-//     }
-// }

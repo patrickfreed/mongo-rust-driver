@@ -5,8 +5,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::error::Result;
-
 /// A runtime-agnostic handle used for awaiting on tasks spawned in `AsyncRuntime::execute`.
 /// Wraps either `tokio::task::JoinHandle` or `async_std::task::JoinHandle`.
 ///
