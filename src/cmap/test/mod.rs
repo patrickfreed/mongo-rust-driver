@@ -153,15 +153,15 @@ impl Executor {
         let mut actual_events = self.state.handler.events.write().unwrap();
         actual_events.retain(|e| !ignored_event_names.iter().any(|name| e.name() == name));
 
-        // if actual_events.len() < self.events.len() {
-        //     panic!(
-        //         "{}: more events expected than were actually received. expected: {:?}, actual: \
-        //          {:?}",
-        //         self.description,
-        //         self.events,
-        //         actual_events.deref()
-        //     )
-        // }
+        if actual_events.len() < self.events.len() {
+            panic!(
+                "{}: more events expected than were actually received. expected: {:?}, actual: \
+                 {:?}",
+                self.description,
+                self.events,
+                actual_events.deref()
+            )
+        }
 
         println!("actual");
         for event in actual_events.iter() {
@@ -230,14 +230,14 @@ impl Operation {
                     let conn = state.connections.write().await.remove(&connection).unwrap();
                     drop(conn);
 
-                    // if let Some(pool) = state.pool.read().await.deref() {
-                    //     pool.check_in(conn).await;
-                    // }
-                    RUNTIME.delay_for(Duration::from_millis(100)).await;
+                    // give some time for drop to happen.
+                    RUNTIME.delay_for(Duration::from_millis(500)).await;
                 }
                 Operation::Clear => {
                     if let Some(pool) = state.pool.write().await.deref() {
                         pool.clear();
+                        // give some time for clear to happen.
+                        RUNTIME.delay_for(Duration::from_millis(500)).await;
                     }
                 }
                 Operation::Close => {
