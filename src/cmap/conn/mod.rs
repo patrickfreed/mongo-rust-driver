@@ -292,19 +292,12 @@ impl Drop for Connection {
         // the `close_and_drop` helper explicitly, so we don't add it back to the
         // pool or emit any events.
         if let Some(pool_manager) = self.pool_manager.take() {
-            println!("{}@{}: checking in", self.id, self.address);
             let dropped_connection = self.take();
-            println!("{}@{}: got manager", self.id, self.address);
             if let Err(mut conn) = pool_manager.check_in(dropped_connection) {
-                println!("{}@{}: got error, closing", self.id, self.address);
                 // the check in failed because the pool has been dropped, so we emit the event
                 // here and drop the connection.
                 conn.close(ConnectionClosedReason::PoolClosed);
-            } else {
-                println!("{}@{}: check in request succeeded", self.id, self.address);
             }
-        } else {
-            println!("{}@{}: dropping", self.id, self.address);
         }
     }
 }

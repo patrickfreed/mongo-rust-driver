@@ -129,11 +129,6 @@ impl ConnectionPool {
         conn
     }
 
-    #[cfg(test)]
-    pub(crate) async fn check_in(&self, conn: Connection) {
-        self.manager.check_in(conn);
-    }
-
     /// Increments the generation of the pool. Rather than eagerly removing stale connections from
     /// the pool, they are left for the background thread to clean up.
     pub(crate) fn clear(&self) {

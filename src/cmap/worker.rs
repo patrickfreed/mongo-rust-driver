@@ -164,11 +164,6 @@ impl ConnectionPoolWorker {
         let mut maintenance_interval = RUNTIME.interval(Duration::from_millis(500));
 
         loop {
-            println!(
-                "worker {}: waiting for task {}",
-                self.address,
-                self.unfinished_check_out.is_some()
-            );
             // If there's an outstanding request and we can serve it, do so. Otherwise poll
             // for a new request
             let task = if self.unfinished_check_out.is_some()
@@ -181,7 +176,6 @@ impl ConnectionPoolWorker {
                                         if self.unfinished_check_out.is_none() => PoolTask::CheckOut(result_sender),
                     Some(request) = self.management_receiver.recv() => request.into(),
                     _ = self.handle_listener.listen() => {
-                        println!("breaking!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                         // all worker handles have been dropped meaning this
                         // pool has no more references and can be dropped itself.
                         break
@@ -190,12 +184,10 @@ impl ConnectionPoolWorker {
                         PoolTask::Maintenance
                     },
                     else => {
-                        println!("worker: breaking worker");
                         break
                     }
                 }
             };
-            println!("worker: got {:?}", task);
 
             match task {
                 PoolTask::CheckOut(result_sender) => self.check_out(result_sender).await,
@@ -207,7 +199,6 @@ impl ConnectionPoolWorker {
             }
         }
 
-        println!("worker: pool shutting down");
         while let Some(connection) = self.available_connections.pop_front() {
             connection.close_and_drop(ConnectionClosedReason::PoolClosed);
         }
@@ -281,7 +272,6 @@ impl ConnectionPoolWorker {
                     // The async runtime was dropped which means nothing will be waiting
                     // on the request, so we can just exit.
                     None => {
-                        println!("runtime dropped");
                         return;
                     }
                 };
@@ -481,12 +471,6 @@ impl From<PoolManagementRequest> for PoolTask {
 #[derive(Debug, Clone)]
 pub(super) struct PoolWorkerHandle {
     sender: mpsc::Sender<()>,
-}
-
-impl Drop for PoolWorkerHandle {
-    fn drop(&mut self) {
-        println!("handle drop")
-    }
 }
 
 /// Listener used to determine when all handles have been dropped.

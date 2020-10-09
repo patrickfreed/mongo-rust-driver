@@ -163,10 +163,6 @@ impl Executor {
             )
         }
 
-        println!("actual");
-        for event in actual_events.iter() {
-            println!("{}", event.name());
-        }
         for i in 0..self.events.len() {
             assert_matches(
                 &actual_events[i],
@@ -186,14 +182,11 @@ impl Operation {
             match self {
                 Operation::StartHelper { target, operations } => {
                     let state_ref = state.clone();
-                    let target_name = target.clone();
                     let task = RUNTIME.spawn(async move {
                         for operation in operations {
-                            println!("{}: {:?}", target_name, operation);
                             // If any error occurs during an operation, we halt the thread and yield
                             // that value when `join` is called on the thread.
                             operation.execute(state_ref.clone()).await?;
-                            println!("{}: done!", target_name);
                         }
                         Ok(())
                     });
@@ -206,19 +199,14 @@ impl Operation {
                 }
                 Operation::WaitForEvent { event, count } => {
                     while state.count_events(&event) < count {
-                        println!("waiting for {} {} events", count, event);
                         RUNTIME.delay_for(Duration::from_millis(100)).await;
                     }
                 }
                 Operation::CheckOut { label } => {
-                    println!("getting lock for check out {:?}", label);
                     if let Some(pool) = state.pool.read().await.deref() {
-                        println!("got lock, checking out {:?}", label);
-                        let mut conn = pool.check_out().await?;
-                        println!("checked out! {:?}", label);
+                        let conn = pool.check_out().await?;
 
                         if let Some(label) = label {
-                            println!("checked out {}", label);
                             state.connections.write().await.insert(label, conn);
                         } else {
                             state.unlabeled_connections.lock().await.push(conn);
@@ -226,7 +214,6 @@ impl Operation {
                     }
                 }
                 Operation::CheckIn { connection } => {
-                    println!("checking in {}", connection);
                     let conn = state.connections.write().await.remove(&connection).unwrap();
                     drop(conn);
 
@@ -326,27 +313,23 @@ async fn cmap_spec_tests() {
             return;
         }
 
-        println!("running {}", test_file.description);
-
         let _guard: RwLockReadGuard<()> = LOCK.run_concurrently().await;
 
-        // let client = EventClient::new().await;
-        // if let Some(ref run_on) = test_file.run_on {
-        //     let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
-        //     if !can_run_on {
-        //         println!("Skipping {}", test_file.description);
-        //         return;
-        //     }
-        // }
+        let client = EventClient::new().await;
+        if let Some(ref run_on) = test_file.run_on {
+            let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
+            if !can_run_on {
+                return;
+            }
+        }
 
-        // if let Some(ref fail_point) = test_file.fail_point {
-        //     println!("fp");
-        //     client
-        //         .database("admin")
-        //         .run_command(fail_point.clone(), None)
-        //         .await
-        //         .unwrap();
-        // }
+        if let Some(ref fail_point) = test_file.fail_point {
+            client
+                .database("admin")
+                .run_command(fail_point.clone(), None)
+                .await
+                .unwrap();
+        }
 
         let executor = Executor::new(test_file);
         executor.execute_test().await;

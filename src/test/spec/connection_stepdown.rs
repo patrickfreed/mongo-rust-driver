@@ -15,7 +15,7 @@ use crate::{
         InsertManyOptions,
         WriteConcern,
     },
-    test::{util::EventClient, TestClient, LOCK},
+    test::{util::EventClient, LOCK},
     Collection,
     Database,
     RUNTIME,
