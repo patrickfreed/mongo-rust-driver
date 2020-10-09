@@ -6,7 +6,7 @@ use std::{collections::HashMap, ops::Deref, sync::Arc, time::Duration};
 
 use futures::future::{BoxFuture, FutureExt};
 
-use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
+use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
 use self::{
     event::{Event, EventHandler},
@@ -21,11 +21,14 @@ use crate::{
     test::{assert_matches, run_spec_test, EventClient, Matchable, CLIENT_OPTIONS, LOCK},
     RUNTIME,
 };
+use bson::doc;
 
 const TEST_DESCRIPTIONS_TO_SKIP: &[&str] = &[
     "must destroy checked in connection if pool has been closed",
     "must throw error if checkOut is called on a closed pool",
 ];
+
+const EVENT_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 struct Executor {
@@ -111,8 +114,6 @@ impl Executor {
     async fn execute_test(self) {
         let mut error: Option<Error> = None;
         let operations = self.operations;
-
-        println!("Executing {}", self.description);
 
         for operation in operations {
             let err = operation.execute(self.state.clone()).await.err();
@@ -218,13 +219,13 @@ impl Operation {
                     drop(conn);
 
                     // give some time for drop to happen.
-                    RUNTIME.delay_for(Duration::from_millis(500)).await;
+                    RUNTIME.delay_for(EVENT_DELAY).await;
                 }
                 Operation::Clear => {
                     if let Some(pool) = state.pool.write().await.deref() {
                         pool.clear();
                         // give some time for clear to happen.
-                        RUNTIME.delay_for(Duration::from_millis(500)).await;
+                        RUNTIME.delay_for(EVENT_DELAY).await;
                     }
                 }
                 Operation::Close => {
@@ -306,16 +307,16 @@ impl Matchable for Event {
 #[cfg_attr(feature = "async-std-runtime", async_std::test)]
 async fn cmap_spec_tests() {
     async fn run_cmap_spec_tests(test_file: TestFile) {
-        if test_file.description.contains("maxConnecting") {
-            return;
-        }
         if TEST_DESCRIPTIONS_TO_SKIP.contains(&test_file.description.as_str()) {
             return;
         }
 
-        let _guard: RwLockReadGuard<()> = LOCK.run_concurrently().await;
+        let _guard: RwLockWriteGuard<()> = LOCK.run_exclusively().await;
 
-        let client = EventClient::new().await;
+        let mut options = CLIENT_OPTIONS.clone();
+        options.hosts.drain(1..);
+        options.direct_connection = Some(true);
+        let client = EventClient::with_options(options).await;
         if let Some(ref run_on) = test_file.run_on {
             let can_run_on = run_on.iter().any(|run_on| run_on.can_run_on(&client));
             if !can_run_on {
@@ -323,6 +324,7 @@ async fn cmap_spec_tests() {
             }
         }
 
+        let should_disable_fp = test_file.fail_point.is_some();
         if let Some(ref fail_point) = test_file.fail_point {
             client
                 .database("admin")
@@ -333,6 +335,20 @@ async fn cmap_spec_tests() {
 
         let executor = Executor::new(test_file);
         executor.execute_test().await;
+
+        if should_disable_fp {
+            client
+                .database("admin")
+                .run_command(
+                    doc! {
+                        "configureFailPoint": "failCommand",
+                        "mode": "off"
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
     }
 
     run_spec_test(&["connection-monitoring-and-pooling"], run_cmap_spec_tests).await;
