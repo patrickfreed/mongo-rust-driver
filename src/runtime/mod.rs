@@ -1,6 +1,7 @@
 mod async_read_ext;
 mod async_write_ext;
 mod http;
+#[cfg(feature = "async-std-runtime")]
 mod interval;
 mod join_handle;
 mod resolver;
@@ -9,18 +10,18 @@ mod stream;
 use std::{future::Future, net::SocketAddr, time::Duration};
 
 pub(crate) use self::{
-    async_read_ext::AsyncLittleEndianRead,
-    async_write_ext::AsyncLittleEndianWrite,
-    join_handle::AsyncJoinHandle,
-    resolver::AsyncResolver,
-    stream::AsyncStream,
+    async_read_ext::AsyncLittleEndianRead, async_write_ext::AsyncLittleEndianWrite,
+    join_handle::AsyncJoinHandle, resolver::AsyncResolver, stream::AsyncStream,
 };
 use crate::{
     error::{ErrorKind, Result},
     options::StreamAddress,
 };
 pub(crate) use http::HttpClient;
+#[cfg(feature = "async-std-runtime")]
 use interval::Interval;
+#[cfg(feature = "tokio-runtime")]
+use tokio::time::Interval;
 
 /// An abstract handle to the async runtime.
 #[derive(Clone, Copy, Debug)]
@@ -132,8 +133,13 @@ impl AsyncRuntime {
     }
 
     pub(crate) fn interval(self, duration: Duration) -> Interval {
-        #[cfg(feature = "tokio-runtime")]
-        tokio::time::interval(duration)
+        match self {
+            #[cfg(feature = "tokio-runtime")]
+            Self::Tokio => tokio::time::interval(duration),
+
+            #[cfg(feature = "async-std-runtime")]
+            Self::AsyncStd => Interval::new(duration),
+        }
     }
 
     pub(crate) async fn resolve_address(
