@@ -273,8 +273,8 @@ impl Connection {
             handler: self.handler.take(),
             stream_description: self.stream_description.take(),
             command_executing: self.command_executing,
-            pool_manager: self.pool_manager.take(),
-            ready_and_available_time: self.ready_and_available_time,
+            pool_manager: None,
+            ready_and_available_time: None,
         }
     }
 }
