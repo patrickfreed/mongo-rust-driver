@@ -1,16 +1,20 @@
-use approx::{abs_diff_eq, abs_diff_ne};
-use bson::Document;
+use std::{collections::HashMap, sync::Arc};
+
+use approx::abs_diff_eq;
 use serde::Deserialize;
 
-use crate::test::run_spec_test;
-use rand::prelude::{IteratorRandom, SliceRandom};
-use std::collections::HashMap;
+use crate::{
+    options::StreamAddress,
+    sdam::{description::topology::server_selection, Server},
+    test::run_spec_test,
+};
 
 #[derive(Debug, Deserialize)]
 struct TestFile {
     description: String,
     in_window: Vec<TestPoolDescription>,
     expected_frequencies: HashMap<String, f64>,
+    max_pool_size: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,45 +24,32 @@ struct TestPoolDescription {
     available_connection_count: u32,
 }
 
-fn select_server(in_window: &Vec<TestPoolDescription>) -> String {
-    if in_window.len() == 1 {
-        return in_window[0].id.clone();
-    }
-
-    let mut rng = rand::thread_rng();
-    let mut choices = in_window.iter().choose_multiple(&mut rng, 2);
-    choices.shuffle(&mut rng);
-
-    let server1 = choices[0];
-    let server2 = choices[1];
-
-    if abs_diff_ne!(
-        server1.active_connection_count,
-        server2.active_connection_count,
-        epsilon = 1
-    ) {
-        choices
-            .iter()
-            .min_by_key(|server| server.active_connection_count)
-            .unwrap()
-            .id
-            .clone()
-    } else {
-        choices
-            .iter()
-            .max_by_key(|server| server.available_connection_count)
-            .unwrap_or(&server1)
-            .id
-            .clone()
-    }
-}
-
 async fn run_test(test_file: TestFile) {
     let mut tallies: HashMap<String, u32> = HashMap::new();
 
+    let max_pool_size = test_file.max_pool_size;
+    let servers: Vec<Arc<Server>> = test_file
+        .in_window
+        .into_iter()
+        .map(|desc| {
+            Arc::new(Server::new_mocked(
+                StreamAddress {
+                    hostname: desc.id,
+                    port: None,
+                },
+                max_pool_size,
+                desc.active_connection_count + desc.available_connection_count,
+                desc.available_connection_count,
+            ))
+        })
+        .collect();
+
     for _ in 0..1000 {
-        let selection = select_server(&test_file.in_window);
-        *tallies.entry(selection).or_insert(0) += 1;
+        let selection =
+            server_selection::select_server_in_latency_window(servers.iter().collect()).unwrap();
+        *tallies
+            .entry(selection.address.hostname.clone())
+            .or_insert(0) += 1;
     }
 
     for (id, expected_frequency) in test_file.expected_frequencies {

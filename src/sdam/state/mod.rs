@@ -26,7 +26,7 @@ use crate::{
     sdam::{
         description::{
             server::{ServerDescription, ServerType},
-            topology::{TopologyDescriptionDiff, TopologyType},
+            topology::{server_selection, TopologyDescriptionDiff, TopologyType},
         },
         monitor::Monitor,
         srv_polling::SrvPollingMonitor,
@@ -175,10 +175,11 @@ impl Topology {
     ) -> Result<Option<Arc<Server>>> {
         let topology_state = self.state.read().await;
 
-        Ok(topology_state
-            .description
-            .select_server(criteria)?
-            .and_then(|server| topology_state.servers.get(&server.address).cloned()))
+        server_selection::attempt_to_select_server(
+            criteria,
+            &topology_state.description,
+            &topology_state.servers,
+        )
     }
 
     /// Creates a new server selection timeout error message given the `criteria`.

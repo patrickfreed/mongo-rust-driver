@@ -7,7 +7,7 @@ use crate::error::Error;
 /// A PoolManager will NOT keep a pool from going out of scope and closing.
 #[derive(Clone, Debug)]
 pub(super) struct PoolManager {
-    pub(super) sender: mpsc::UnboundedSender<PoolManagementRequest>,
+    sender: mpsc::UnboundedSender<PoolManagementRequest>,
 }
 
 impl PoolManager {

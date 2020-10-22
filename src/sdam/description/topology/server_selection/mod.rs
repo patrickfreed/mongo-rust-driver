@@ -1,24 +1,85 @@
 #[cfg(test)]
 mod test;
 
-use std::{fmt, time::Duration};
+use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
-use rand::seq::IteratorRandom;
+use approx::abs_diff_ne;
+use rand::{
+    rngs::SmallRng,
+    seq::{IteratorRandom, SliceRandom},
+    SeedableRng,
+};
 
 use super::TopologyDescription;
 use crate::{
     error::{ErrorKind, Result},
+    options::StreamAddress,
     sdam::{
         description::{
             server::{ServerDescription, ServerType},
             topology::TopologyType,
         },
         public::ServerInfo,
+        Server,
     },
     selection_criteria::{ReadPreference, SelectionCriteria, TagSet},
 };
 
 const DEFAULT_LOCAL_THRESHOLD: Duration = Duration::from_millis(15);
+
+/// Attempt to select a server, returning None if no server could be selected
+/// that matched the provided criteria.
+pub(crate) fn attempt_to_select_server<'a>(
+    criteria: &'a SelectionCriteria,
+    topology_description: &'a TopologyDescription,
+    servers: &'a HashMap<StreamAddress, Arc<Server>>,
+) -> Result<Option<Arc<Server>>> {
+    let in_window = topology_description.suitable_servers_in_latency_window(criteria)?;
+    let in_window_servers = in_window
+        .into_iter()
+        .flat_map(|desc| servers.get(&desc.address))
+        .collect();
+    Ok(select_server_in_latency_window(in_window_servers))
+}
+
+/// Choose a server from several suitable choices within the latency window according to
+/// the algorithm laid out in the server selection specification.
+///
+/// This is the last stage of server selection and should not be called directly.
+pub(crate) fn select_server_in_latency_window(in_window: Vec<&Arc<Server>>) -> Option<Arc<Server>> {
+    if in_window.is_empty() {
+        return None;
+    } else if in_window.len() == 1 {
+        return Some(in_window[0].clone());
+    }
+
+    let mut rng = SmallRng::from_entropy();
+    let mut choices = in_window.into_iter().choose_multiple(&mut rng, 2);
+    choices.shuffle(&mut rng);
+
+    let server1 = choices[0];
+    let server2 = choices[1];
+
+    // choose server with min active connection count only if the counts differ by more than
+    // 5% of max_pool_size
+    if abs_diff_ne!(
+        server1.active_connection_count(),
+        server2.active_connection_count(),
+        epsilon = std::cmp::max(1, server1.max_pool_size() / 20)
+    ) {
+        choices
+            .into_iter()
+            .min_by_key(|s| s.active_connection_count())
+            .cloned()
+    } else {
+        // otherwise choose the one with most available connections
+        choices
+            .into_iter()
+            .max_by_key(|s| s.available_connection_count())
+            .or(Some(server1))
+            .cloned()
+    }
+}
 
 impl TopologyDescription {
     pub(crate) fn server_selection_timeout_error_message(
@@ -39,27 +100,15 @@ impl TopologyDescription {
         }
     }
 
-    pub(crate) fn select_server<'a>(
+    pub(crate) fn suitable_servers_in_latency_window<'a>(
         &'a self,
         criteria: &'a SelectionCriteria,
-    ) -> Result<Option<&'a ServerDescription>> {
+    ) -> Result<Vec<&'a ServerDescription>> {
         if let Some(message) = self.compatibility_error() {
             return Err(ErrorKind::ServerSelectionError {
                 message: message.to_string(),
             }
             .into());
-        }
-
-        // Although `suitable_servers` has to handle the Unknown case for testing, we skip calling
-        // it here to avoid an allocation.
-        if let TopologyType::Unknown = self.topology_type {
-            return Ok(None);
-        }
-
-        // Similarly, if the topology type is Single, we skip the below logic as well and just
-        // return the only server in the topology.
-        if let TopologyType::Single = self.topology_type {
-            return Ok(self.servers.values().next());
         }
 
         let mut suitable_servers = match criteria {
@@ -78,7 +127,7 @@ impl TopologyDescription {
         }
 
         // Choose a random server from the remaining set.
-        Ok(suitable_servers.into_iter().choose(&mut rand::thread_rng()))
+        Ok(suitable_servers)
     }
 
     fn has_available_servers(&self) -> bool {
