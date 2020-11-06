@@ -22,7 +22,7 @@ use rustls::{
     ServerCertVerifier,
     TLSError,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use strsim::jaro_winkler;
 pub use trust_dns_resolver::config::ResolverConfig;
 use typed_builder::TypedBuilder;
@@ -91,7 +91,7 @@ lazy_static! {
 }
 
 /// A hostname:port address pair.
-#[derive(Clone, Debug, Deserialize, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct StreamAddress {
     /// The hostname of the address.
     pub hostname: String,
@@ -124,6 +124,16 @@ impl Hash for StreamAddress {
     {
         self.hostname.hash(state);
         self.port.unwrap_or(27017).hash(state);
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamAddress {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: String = Deserialize::deserialize(deserializer)?;
+        Self::parse(s.as_str()).map_err(|e| serde::de::Error::custom(format!("{}", e)))
     }
 }
 

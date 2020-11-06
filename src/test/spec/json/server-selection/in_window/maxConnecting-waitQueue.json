@@ -1,0 +1,49 @@
+{
+  "description": "waitQueue length caused by maxConnecting is considered",
+  "topology_description": {
+    "type": "Sharded",
+    "servers": [
+      {
+        "address": "a:27017",
+        "avg_rtt_ms": 35,
+        "type": "Mongos"
+      },
+      {
+        "address": "b:27017",
+        "avg_rtt_ms": 35,
+        "type": "Mongos"
+      },
+      {
+        "address": "c:27017",
+        "avg_rtt_ms": 35,
+        "type": "Mongos"
+      }
+    ]
+  },
+  "in_window": [
+    {
+      "address": "a:27017",
+      "active_connection_count": 6,
+      "available_connection_count": 0,
+      "wait_queue_length": 10
+    },
+    {
+      "address": "b:27017",
+      "active_connection_count": 10,
+      "available_connection_count": 0,
+      "wait_queue_length": 0
+    },
+    {
+      "address": "c:27017",
+      "active_connection_count": 16,
+      "available_connection_count": 3,
+      "wait_queue_length": 0
+    }
+  ],
+  "max_pool_size": 100,
+  "expected_frequencies": {
+    "a:27017": 0,
+    "b:27017": 0.66,
+    "c:27017": 0.33
+  }
+}

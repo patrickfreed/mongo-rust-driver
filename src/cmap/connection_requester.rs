@@ -75,34 +75,20 @@ impl ConnectionRequester {
 #[derive(Debug)]
 pub(super) struct ConnectionRequestReceiver {
     receiver: mpsc::UnboundedReceiver<oneshot::Sender<RequestedConnection>>,
-    cache: Option<ConnectionRequest>,
 }
 
 impl ConnectionRequestReceiver {
     pub(super) fn new(
         receiver: mpsc::UnboundedReceiver<oneshot::Sender<RequestedConnection>>,
     ) -> Self {
-        Self {
-            receiver,
-            cache: None,
-        }
+        Self { receiver }
     }
 
     pub(super) async fn recv(&mut self) -> Option<ConnectionRequest> {
-        match self.cache.take() {
-            Some(request) => Some(request),
-            None => self
-                .receiver
-                .recv()
-                .await
-                .map(|sender| ConnectionRequest { sender }),
-        }
-    }
-
-    /// Put a request back into the receiver. Next call to `recv` will immediately
-    /// return this value.
-    pub(super) fn cache_request(&mut self, request: ConnectionRequest) {
-        self.cache = Some(request);
+        self.receiver
+            .recv()
+            .await
+            .map(|sender| ConnectionRequest { sender })
     }
 }
 
