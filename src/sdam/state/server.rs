@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::cmap::PoolState;
 use crate::{
     cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
     error::Result,
@@ -21,11 +19,16 @@ impl Server {
     pub(crate) fn new_mocked(
         address: StreamAddress,
         max_pool_size: u32,
-        mocked_pool_state: PoolState,
+        active_connection_count: u32,
+        available_connection_count: u32,
     ) -> Self {
         Self {
             address,
-            pool: ConnectionPool::new_mocked(max_pool_size, mocked_pool_state),
+            pool: ConnectionPool::new_mocked(
+                max_pool_size,
+                active_connection_count,
+                available_connection_count,
+            ),
         }
     }
 
@@ -58,10 +61,6 @@ impl Server {
     /// Number of pending and in use connections. Approximates load against this server.
     pub(crate) fn active_connection_count(&self) -> u32 {
         self.pool.active_connection_count()
-    }
-
-    pub(crate) fn wait_queue_length(&self) -> u32 {
-        self.pool.wait_queue_length()
     }
 
     /// Number of unused connections in this server's pool.

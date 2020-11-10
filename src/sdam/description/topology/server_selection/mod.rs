@@ -60,20 +60,16 @@ pub(crate) fn select_server_in_latency_window(in_window: Vec<&Arc<Server>>) -> O
     let server1 = choices[0];
     let server2 = choices[1];
 
-    fn op_count(server: &Server) -> u32 {
-        server.active_connection_count() + server.wait_queue_length()
-    }
-
     // choose server with min active connection count only if the counts differ by more than
     // 5% of max_pool_size
     if abs_diff_ne!(
-        op_count(server1.as_ref()),
-        op_count(server2.as_ref()),
+        server1.active_connection_count(),
+        server2.active_connection_count(),
         epsilon = std::cmp::max(1, server1.max_pool_size() / 20)
     ) {
         choices
             .into_iter()
-            .min_by_key(|s| op_count(s.as_ref()))
+            .min_by_key(|s| s.active_connection_count())
             .cloned()
     } else {
         // otherwise choose the one with most available connections

@@ -104,10 +104,6 @@ pub(crate) struct ConnectionPoolWorker {
 
     /// A pool manager that can be cloned and attached to connections checked out of the pool.
     manager: PoolManager,
-
-    /// Queue of ConnectionRequests that need to be served but could not be at the
-    /// time of their receipt (e.g. due to pool being out of connections).
-    wait_queue: VecDeque<ConnectionRequest>,
 }
 
 impl ConnectionPoolWorker {
@@ -164,7 +160,6 @@ impl ConnectionPoolWorker {
             state_publisher,
             manager: manager.clone(),
             handle_listener,
-            wait_queue: Default::default(),
         };
 
         RUNTIME.execute(async move {
@@ -182,7 +177,7 @@ impl ConnectionPoolWorker {
 
         loop {
             let task = tokio::select! {
-                Some(request) = self.request_receiver.recv() => {
+                Some(request) = self.request_receiver.recv(), if self.can_service_connection_request() => {
                     PoolTask::CheckOut(request)
                 },
                 Some(request) = self.management_receiver.recv() => request.into(),
@@ -200,34 +195,15 @@ impl ConnectionPoolWorker {
             };
 
             match task {
-                PoolTask::CheckOut(request) => self.wait_queue.push_back(request),
+                PoolTask::CheckOut(result_sender) => self.check_out(result_sender).await,
                 PoolTask::CheckIn(connection) => self.check_in(connection),
                 PoolTask::Clear => self.clear(),
                 PoolTask::HandleConnectionSucceeded(c) => self.handle_connection_succeeded(c),
                 PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
                 PoolTask::Maintenance => self.perform_maintenance(),
             }
-
-            // if possible, service the wait queue
-            if self.can_service_connection_request() {
-                if let Some(request) = self.wait_queue.pop_front() {
-                    self.check_out(request).await;
-                }
-            }
-
-            // publish new state after processing task and servicing the wait queue.
-            self.state_publisher.publish(PoolState {
-                total_connection_count: self.total_connection_count,
-                available_connection_count: self.available_connections.len() as u32,
-                wait_queue_length: self.wait_queue.len() as u32,
-            })
         }
 
-        self.teardown()
-    }
-
-    /// Clean up internal state by dropping all pooled connections.
-    fn teardown(mut self) {
         while let Some(connection) = self.available_connections.pop_front() {
             connection.close_and_drop(ConnectionClosedReason::PoolClosed);
         }
@@ -267,6 +243,8 @@ impl ConnectionPoolWorker {
                 let mut connection = request.unwrap_pooled_connection();
                 connection.mark_as_available();
                 self.available_connections.push_back(connection);
+            } else {
+                self.publish_state();
             }
 
             return;
@@ -311,9 +289,9 @@ impl ConnectionPoolWorker {
             let _: std::result::Result<_, _> =
                 request.fulfill(RequestedConnection::Establishing(handle));
         } else {
-            // put the request back to the front of the WaitQueue so that it will be processed
+            // put the request in the receiver's cache so that it will be processed
             // next time a request can be processed.
-            self.wait_queue.push_front(request);
+            self.request_receiver.cache_request(request);
         }
     }
 
@@ -331,6 +309,7 @@ impl ConnectionPoolWorker {
         self.emit_event(|handler| {
             handler.handle_connection_created_event(pending_connection.created_event())
         });
+        self.publish_state();
 
         pending_connection
     }
@@ -345,6 +324,7 @@ impl ConnectionPoolWorker {
         // connection count.
         self.total_connection_count -= 1;
         self.pending_connection_count -= 1;
+        self.publish_state();
     }
 
     /// Process a successful connection establishment, optionally populating the pool with the
@@ -355,6 +335,7 @@ impl ConnectionPoolWorker {
             connection.mark_as_available();
             self.available_connections.push_back(connection);
         }
+        self.publish_state();
     }
 
     fn check_in(&mut self, mut conn: Connection) {
@@ -372,6 +353,7 @@ impl ConnectionPoolWorker {
             self.close_connection(conn, ConnectionClosedReason::Dropped)
         } else {
             self.available_connections.push_back(conn);
+            self.publish_state();
         }
     }
 
@@ -400,6 +382,7 @@ impl ConnectionPoolWorker {
     fn close_connection(&mut self, connection: Connection, reason: ConnectionClosedReason) {
         connection.close_and_drop(reason);
         self.total_connection_count -= 1;
+        self.publish_state();
     }
 
     /// Ensure all connections in the pool are valid and that the pool is managing at least
@@ -451,6 +434,13 @@ impl ConnectionPoolWorker {
                 });
             }
         }
+    }
+
+    fn publish_state(&self) {
+        self.state_publisher.publish(PoolState {
+            total_connection_count: self.total_connection_count,
+            available_connection_count: self.available_connections.len() as u32,
+        })
     }
 }
 

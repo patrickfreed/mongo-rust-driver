@@ -3,10 +3,9 @@ use tokio::sync::watch;
 /// Struct containing information about the latest known state of a
 /// connection pool.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PoolState {
-    pub(crate) total_connection_count: u32,
-    pub(crate) available_connection_count: u32,
-    pub(crate) wait_queue_length: u32,
+pub(super) struct PoolState {
+    pub(super) total_connection_count: u32,
+    pub(super) available_connection_count: u32,
 }
 
 /// Struct used to publish updates to the pool state.
@@ -20,7 +19,6 @@ impl PoolStatePublisher {
         let (sender, receiver) = watch::channel(PoolState {
             available_connection_count: 0,
             total_connection_count: 0,
-            wait_queue_length: 0,
         });
 
         (Self { sender }, PoolStateListener { receiver })

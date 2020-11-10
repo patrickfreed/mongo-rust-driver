@@ -1,0 +1,14 @@
+{
+    "description": "test",
+    "in_window": [
+        { "id": "a", "active_connection_count": 3, "available_connection_count": 0 },
+        { "id": "b", "active_connection_count": 6, "available_connection_count": 1 },
+        { "id": "c", "active_connection_count": 20, "available_connection_count": 0 }
+    ],
+    "max_pool_size": 100,
+    "expected_frequencies": {
+        "a": 0.33,
+        "b": 0.66,
+        "c": 0
+    }
+}

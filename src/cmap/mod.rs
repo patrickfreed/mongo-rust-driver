@@ -33,9 +33,10 @@ use manager::PoolManager;
 use worker::ConnectionPoolWorker;
 
 #[cfg(test)]
-use self::{state::PoolStatePublisher, worker::PoolWorkerHandle};
-#[cfg(test)]
-pub(crate) use state::PoolState;
+use self::{
+    state::{PoolState, PoolStatePublisher},
+    worker::PoolWorkerHandle,
+};
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -91,13 +92,20 @@ impl ConnectionPool {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_mocked(max_pool_size: u32, mocked_pool_state: PoolState) -> Self {
+    pub(crate) fn new_mocked(
+        max_pool_size: u32,
+        total_connection_count: u32,
+        available_connection_count: u32,
+    ) -> Self {
         let (manager, _) = PoolManager::new();
         let handle = PoolWorkerHandle::new_mocked();
         let (connection_requester, _) = ConnectionRequester::new(Default::default(), handle);
         let (state_publisher, state_listener) = PoolStatePublisher::new();
 
-        state_publisher.publish(mocked_pool_state);
+        state_publisher.publish(PoolState {
+            total_connection_count,
+            available_connection_count,
+        });
 
         Self {
             address: StreamAddress::default(),
@@ -177,10 +185,6 @@ impl ConnectionPool {
     pub(crate) fn active_connection_count(&self) -> u32 {
         let state = self.state_listener.latest();
         state.total_connection_count - state.available_connection_count
-    }
-
-    pub(crate) fn wait_queue_length(&self) -> u32 {
-        self.state_listener.latest().wait_queue_length
     }
 
     pub(crate) fn max_pool_size(&self) -> u32 {
