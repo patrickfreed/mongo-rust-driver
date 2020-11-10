@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::{
     cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
     error::Result,
@@ -12,23 +14,18 @@ pub(crate) struct Server {
 
     /// The connection pool for the server.
     pool: ConnectionPool,
+
+    /// Number of operations currently using this server.
+    opcount: AtomicU32,
 }
 
 impl Server {
     #[cfg(test)]
-    pub(crate) fn new_mocked(
-        address: StreamAddress,
-        max_pool_size: u32,
-        active_connection_count: u32,
-        available_connection_count: u32,
-    ) -> Self {
+    pub(crate) fn new_mocked(address: StreamAddress, opcount: u32) -> Self {
         Self {
-            address,
-            pool: ConnectionPool::new_mocked(
-                max_pool_size,
-                active_connection_count,
-                available_connection_count,
-            ),
+            address: address.clone(),
+            pool: ConnectionPool::new_mocked(address),
+            opcount: AtomicU32::new(opcount),
         }
     }
 
@@ -44,6 +41,7 @@ impl Server {
                 Some(ConnectionPoolOptions::from_client_options(options)),
             ),
             address,
+            opcount: AtomicU32::new(0),
         }
     }
 
@@ -58,18 +56,15 @@ impl Server {
         self.pool.clear();
     }
 
-    /// Number of pending and in use connections. Approximates load against this server.
-    pub(crate) fn active_connection_count(&self) -> u32 {
-        self.pool.active_connection_count()
+    pub(crate) fn increment_opcount(&self) {
+        self.opcount.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Number of unused connections in this server's pool.
-    pub(crate) fn available_connection_count(&self) -> u32 {
-        self.pool.available_connection_count()
+    pub(crate) fn decrement_opcount(&self) {
+        self.opcount.fetch_sub(1, Ordering::SeqCst);
     }
 
-    /// Maximum number of connections that can be opened against this server.
-    pub(crate) fn max_pool_size(&self) -> u32 {
-        self.pool.max_pool_size()
+    pub(crate) fn opcount(&self) -> u32 {
+        self.opcount.load(Ordering::SeqCst)
     }
 }

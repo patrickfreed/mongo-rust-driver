@@ -6,7 +6,6 @@ mod connection_requester;
 mod establish;
 mod manager;
 pub(crate) mod options;
-mod state;
 mod worker;
 
 use std::{sync::Arc, time::Duration};
@@ -15,7 +14,7 @@ use derivative::Derivative;
 
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
-use self::{options::ConnectionPoolOptions, state::PoolStateListener};
+use self::options::ConnectionPoolOptions;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
@@ -33,10 +32,7 @@ use manager::PoolManager;
 use worker::ConnectionPoolWorker;
 
 #[cfg(test)]
-use self::{
-    state::{PoolState, PoolStatePublisher},
-    worker::PoolWorkerHandle,
-};
+use self::worker::PoolWorkerHandle;
 
 const DEFAULT_MAX_POOL_SIZE: u32 = 100;
 
@@ -48,7 +44,6 @@ pub(crate) struct ConnectionPool {
     address: StreamAddress,
     manager: PoolManager,
     connection_requester: ConnectionRequester,
-    state_listener: PoolStateListener,
 
     wait_queue_timeout: Option<Duration>,
     max_pool_size: u32,
@@ -63,7 +58,7 @@ impl ConnectionPool {
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
     ) -> Self {
-        let (manager, connection_requester, state_listener) =
+        let (manager, connection_requester) =
             ConnectionPoolWorker::start(address.clone(), http_client, options.clone());
 
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
@@ -86,35 +81,23 @@ impl ConnectionPool {
             connection_requester,
             wait_queue_timeout,
             event_handler,
-            state_listener,
             max_pool_size,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn new_mocked(
-        max_pool_size: u32,
-        total_connection_count: u32,
-        available_connection_count: u32,
-    ) -> Self {
+    pub(crate) fn new_mocked(address: StreamAddress) -> Self {
         let (manager, _) = PoolManager::new();
         let handle = PoolWorkerHandle::new_mocked();
         let (connection_requester, _) = ConnectionRequester::new(Default::default(), handle);
-        let (state_publisher, state_listener) = PoolStatePublisher::new();
-
-        state_publisher.publish(PoolState {
-            total_connection_count,
-            available_connection_count,
-        });
 
         Self {
-            address: StreamAddress::default(),
+            address,
             manager,
             connection_requester,
             wait_queue_timeout: None,
             event_handler: None,
-            state_listener,
-            max_pool_size,
+            max_pool_size: DEFAULT_MAX_POOL_SIZE,
         }
     }
 
@@ -176,18 +159,5 @@ impl ConnectionPool {
     /// the pool, they are left for the background thread to clean up.
     pub(crate) fn clear(&self) {
         self.manager.clear();
-    }
-
-    pub(crate) fn available_connection_count(&self) -> u32 {
-        self.state_listener.latest().available_connection_count
-    }
-
-    pub(crate) fn active_connection_count(&self) -> u32 {
-        let state = self.state_listener.latest();
-        state.total_connection_count - state.available_connection_count
-    }
-
-    pub(crate) fn max_pool_size(&self) -> u32 {
-        self.max_pool_size
     }
 }

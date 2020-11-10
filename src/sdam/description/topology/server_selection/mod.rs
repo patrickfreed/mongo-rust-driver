@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt, ops::Deref, sync::Arc, time::Duration};
 
 use approx::abs_diff_ne;
 use rand::{
@@ -27,26 +27,63 @@ use crate::{
 
 const DEFAULT_LOCAL_THRESHOLD: Duration = Duration::from_millis(15);
 
+/// Struct encapsulating a selected server that handles the opcount accounting.
+#[derive(Debug)]
+pub(crate) struct SelectedServer {
+    server: Arc<Server>,
+}
+
+impl SelectedServer {
+    fn new(server: Arc<Server>) -> Self {
+        server.increment_opcount();
+        Self { server }
+    }
+}
+
+impl Deref for SelectedServer {
+    type Target = Server;
+
+    fn deref(&self) -> &Server {
+        self.server.deref()
+    }
+}
+
+impl Drop for SelectedServer {
+    fn drop(&mut self) {
+        self.server.decrement_opcount();
+    }
+}
+
 /// Attempt to select a server, returning None if no server could be selected
 /// that matched the provided criteria.
 pub(crate) fn attempt_to_select_server<'a>(
     criteria: &'a SelectionCriteria,
     topology_description: &'a TopologyDescription,
     servers: &'a HashMap<StreamAddress, Arc<Server>>,
-) -> Result<Option<Arc<Server>>> {
+) -> Result<Option<SelectedServer>> {
     let in_window = topology_description.suitable_servers_in_latency_window(criteria)?;
     let in_window_servers = in_window
         .into_iter()
         .flat_map(|desc| servers.get(&desc.address))
         .collect();
-    Ok(select_server_in_latency_window(in_window_servers))
+    Ok(select_server_in_latency_window(in_window_servers, false).map(SelectedServer::new))
 }
 
 /// Choose a server from several suitable choices within the latency window according to
 /// the algorithm laid out in the server selection specification.
 ///
 /// This is the last stage of server selection and should not be called directly.
-pub(crate) fn select_server_in_latency_window(in_window: Vec<&Arc<Server>>) -> Option<Arc<Server>> {
+pub(crate) fn select_server_in_latency_window(
+    in_window: Vec<&Arc<Server>>,
+    rand: bool,
+) -> Option<Arc<Server>> {
+    if rand {
+        return in_window
+            .into_iter()
+            .choose(&mut SmallRng::from_entropy())
+            .cloned();
+    }
+
     if in_window.is_empty() {
         return None;
     } else if in_window.len() == 1 {
@@ -57,28 +94,29 @@ pub(crate) fn select_server_in_latency_window(in_window: Vec<&Arc<Server>>) -> O
     let mut choices = in_window.into_iter().choose_multiple(&mut rng, 2);
     choices.shuffle(&mut rng);
 
-    let server1 = choices[0];
-    let server2 = choices[1];
+    // let server1 = choices[0];
+    // let server2 = choices[1];
 
-    // choose server with min active connection count only if the counts differ by more than
-    // 5% of max_pool_size
-    if abs_diff_ne!(
-        server1.active_connection_count(),
-        server2.active_connection_count(),
-        epsilon = std::cmp::max(1, server1.max_pool_size() / 20)
-    ) {
-        choices
-            .into_iter()
-            .min_by_key(|s| s.active_connection_count())
-            .cloned()
-    } else {
-        // otherwise choose the one with most available connections
-        choices
-            .into_iter()
-            .max_by_key(|s| s.available_connection_count())
-            .or(Some(server1))
-            .cloned()
-    }
+    choices.into_iter().min_by_key(|s| s.opcount()).cloned()
+    // // choose server with min active connection count only if the counts differ by more than
+    // // 5% of max_pool_size
+    // if abs_diff_ne!(
+    //     op_count(server1.as_ref()),
+    //     op_count(server2.as_ref()),
+    //     epsilon = std::cmp::max(1, server1.max_pool_size() / 20)
+    // ) {
+    //     choices
+    //         .into_iter()
+    //         .min_by_key(|s| op_count(s.as_ref()))
+    //         .cloned()
+    // } else {
+    //     // otherwise choose the one with most available connections
+    //     choices
+    //         .into_iter()
+    //         .max_by_key(|s| s.available_connection_count())
+    //         .or(Some(server1))
+    //         .cloned()
+    // }
 }
 
 impl TopologyDescription {

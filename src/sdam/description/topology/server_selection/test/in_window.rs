@@ -27,7 +27,6 @@ struct TestPoolDescription {
 async fn run_test(test_file: TestFile) {
     let mut tallies: HashMap<String, u32> = HashMap::new();
 
-    let max_pool_size = test_file.max_pool_size;
     let servers: Vec<Arc<Server>> = test_file
         .in_window
         .into_iter()
@@ -37,16 +36,15 @@ async fn run_test(test_file: TestFile) {
                     hostname: desc.id,
                     port: None,
                 },
-                max_pool_size,
-                desc.active_connection_count + desc.available_connection_count,
-                desc.available_connection_count,
+                desc.active_connection_count,
             ))
         })
         .collect();
 
     for _ in 0..1000 {
         let selection =
-            server_selection::select_server_in_latency_window(servers.iter().collect()).unwrap();
+            server_selection::select_server_in_latency_window(servers.iter().collect(), false)
+                .unwrap();
         *tallies
             .entry(selection.address.hostname.clone())
             .or_insert(0) += 1;

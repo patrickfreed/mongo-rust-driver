@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 
 use self::server::Server;
 use super::{
+    description::topology::server_selection::SelectedServer,
     message_manager::TopologyMessageSubscriber,
     SessionSupportStatus,
     TopologyDescription,
@@ -172,7 +173,7 @@ impl Topology {
     pub(crate) async fn attempt_to_select_server(
         &self,
         criteria: &SelectionCriteria,
-    ) -> Result<Option<Arc<Server>>> {
+    ) -> Result<Option<SelectedServer>> {
         let topology_state = self.state.read().await;
 
         server_selection::attempt_to_select_server(
@@ -232,7 +233,7 @@ impl Topology {
         &self,
         error: Error,
         conn: &Connection,
-        server: Arc<Server>,
+        server: SelectedServer,
     ) {
         // If we encounter certain errors, we must update the topology as per the
         // SDAM spec.

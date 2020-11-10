@@ -11,7 +11,6 @@ use super::{
     establish::ConnectionEstablisher,
     manager::{ManagementRequestReceiver, PoolManagementRequest, PoolManager},
     options::{ConnectionOptions, ConnectionPoolOptions},
-    state::{PoolState, PoolStateListener, PoolStatePublisher},
     Connection,
     DEFAULT_MAX_POOL_SIZE,
 };
@@ -99,9 +98,6 @@ pub(crate) struct ConnectionPoolWorker {
     /// Receiver for incoming pool management requests (e.g. checking in a connection).
     management_receiver: ManagementRequestReceiver,
 
-    /// Broadcaster used to publish changes to the pool's state.
-    state_publisher: PoolStatePublisher,
-
     /// A pool manager that can be cloned and attached to connections checked out of the pool.
     manager: PoolManager,
 }
@@ -114,7 +110,7 @@ impl ConnectionPoolWorker {
         address: StreamAddress,
         http_client: HttpClient,
         options: Option<ConnectionPoolOptions>,
-    ) -> (PoolManager, ConnectionRequester, PoolStateListener) {
+    ) -> (PoolManager, ConnectionRequester) {
         let establisher = ConnectionEstablisher::new(http_client, options.as_ref());
         let event_handler = options.as_ref().and_then(|opts| opts.event_handler.clone());
 
@@ -140,7 +136,6 @@ impl ConnectionPoolWorker {
         let (connection_requester, request_receiver) =
             ConnectionRequester::new(address.clone(), handle);
         let (manager, management_receiver) = PoolManager::new();
-        let (state_publisher, state_listener) = PoolStatePublisher::new();
 
         let worker = ConnectionPoolWorker {
             address,
@@ -157,7 +152,6 @@ impl ConnectionPoolWorker {
             max_pool_size,
             request_receiver,
             management_receiver,
-            state_publisher,
             manager: manager.clone(),
             handle_listener,
         };
@@ -166,7 +160,7 @@ impl ConnectionPoolWorker {
             worker.execute().await;
         });
 
-        (manager, connection_requester, state_listener)
+        (manager, connection_requester)
     }
 
     /// Run the worker thread, listening on the various receivers until all handles have been
@@ -243,8 +237,6 @@ impl ConnectionPoolWorker {
                 let mut connection = request.unwrap_pooled_connection();
                 connection.mark_as_available();
                 self.available_connections.push_back(connection);
-            } else {
-                self.publish_state();
             }
 
             return;
@@ -309,7 +301,6 @@ impl ConnectionPoolWorker {
         self.emit_event(|handler| {
             handler.handle_connection_created_event(pending_connection.created_event())
         });
-        self.publish_state();
 
         pending_connection
     }
@@ -324,7 +315,6 @@ impl ConnectionPoolWorker {
         // connection count.
         self.total_connection_count -= 1;
         self.pending_connection_count -= 1;
-        self.publish_state();
     }
 
     /// Process a successful connection establishment, optionally populating the pool with the
@@ -335,7 +325,6 @@ impl ConnectionPoolWorker {
             connection.mark_as_available();
             self.available_connections.push_back(connection);
         }
-        self.publish_state();
     }
 
     fn check_in(&mut self, mut conn: Connection) {
@@ -353,7 +342,6 @@ impl ConnectionPoolWorker {
             self.close_connection(conn, ConnectionClosedReason::Dropped)
         } else {
             self.available_connections.push_back(conn);
-            self.publish_state();
         }
     }
 
@@ -382,7 +370,6 @@ impl ConnectionPoolWorker {
     fn close_connection(&mut self, connection: Connection, reason: ConnectionClosedReason) {
         connection.close_and_drop(reason);
         self.total_connection_count -= 1;
-        self.publish_state();
     }
 
     /// Ensure all connections in the pool are valid and that the pool is managing at least
@@ -434,13 +421,6 @@ impl ConnectionPoolWorker {
                 });
             }
         }
-    }
-
-    fn publish_state(&self) {
-        self.state_publisher.publish(PoolState {
-            total_connection_count: self.total_connection_count,
-            available_connection_count: self.available_connections.len() as u32,
-        })
     }
 }
 
