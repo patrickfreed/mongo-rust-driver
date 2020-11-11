@@ -66,6 +66,13 @@ struct State {
 impl State {
     // Counts the number of events of the given type that have occurred so far.
     fn count_events(&self, event_type: &str) -> usize {
+        println!("counting {}", event_type);
+        for event in self.handler.events.read().unwrap().iter() {
+            if event.name() == event_type {
+                print!("match!");
+            }
+            println!("{:?}", event.name());
+        }
         self.handler
             .events
             .read()
@@ -192,6 +199,7 @@ impl Operation {
                 }
                 Operation::WaitForEvent { event, count } => {
                     while state.count_events(&event) < count {
+                        println!("waiting for {}", event);
                         RUNTIME.delay_for(Duration::from_millis(100)).await;
                     }
                 }
@@ -230,8 +238,11 @@ impl Operation {
                 Operation::Clear => {
                     let mut subscriber = state.handler.subscribe();
 
-                    if let Some(pool) = state.pool.write().await.deref() {
+                    println!("acquiring lock");
+                    if let Some(pool) = state.pool.read().await.deref() {
+                        println!("calling clear");
                         pool.clear();
+                        drop(pool);
                         // wait for event to be emitted to ensure drop has completed.
                         subscriber
                             .wait_for_event(EVENT_TIMEOUT, |e| {

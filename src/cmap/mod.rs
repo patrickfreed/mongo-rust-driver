@@ -18,11 +18,8 @@ use self::options::ConnectionPoolOptions;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler,
-        ConnectionCheckoutFailedEvent,
-        ConnectionCheckoutFailedReason,
-        ConnectionCheckoutStartedEvent,
-        PoolCreatedEvent,
+        CmapEventHandler, ConnectionCheckoutFailedEvent, ConnectionCheckoutFailedReason,
+        ConnectionCheckoutStartedEvent, PoolCreatedEvent,
     },
     options::StreamAddress,
     runtime::HttpClient,
@@ -97,6 +94,8 @@ impl ConnectionPool {
 
             handler.handle_connection_checkout_started_event(event);
         });
+
+        println!("{:?}", self.wait_queue_timeout);
 
         let conn = self
             .connection_requester

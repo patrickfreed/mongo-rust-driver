@@ -3,24 +3,17 @@ use derivative::Derivative;
 use super::{
     conn::PendingConnection,
     connection_requester::{
-        ConnectionRequest,
-        ConnectionRequestReceiver,
-        ConnectionRequester,
-        RequestedConnection,
+        ConnectionRequest, ConnectionRequestReceiver, ConnectionRequester, RequestedConnection,
     },
     establish::ConnectionEstablisher,
     manager::{ManagementRequestReceiver, PoolManagementRequest, PoolManager},
     options::{ConnectionOptions, ConnectionPoolOptions},
-    Connection,
-    DEFAULT_MAX_POOL_SIZE,
+    Connection, DEFAULT_MAX_POOL_SIZE,
 };
 use crate::{
     error::{Error, Result},
     event::cmap::{
-        CmapEventHandler,
-        ConnectionClosedEvent,
-        ConnectionClosedReason,
-        PoolClearedEvent,
+        CmapEventHandler, ConnectionClosedEvent, ConnectionClosedReason, PoolClearedEvent,
         PoolClosedEvent,
     },
     options::StreamAddress,
@@ -95,6 +88,9 @@ pub(crate) struct ConnectionPoolWorker {
     /// Receiver for incoming connection check out requests.
     request_receiver: ConnectionRequestReceiver,
 
+    /// Ordered queue of incoming requests waiting for connections.
+    wait_queue: VecDeque<ConnectionRequest>,
+
     /// Receiver for incoming pool management requests (e.g. checking in a connection).
     management_receiver: ManagementRequestReceiver,
 
@@ -151,6 +147,7 @@ impl ConnectionPoolWorker {
             available_connections: VecDeque::new(),
             max_pool_size,
             request_receiver,
+            wait_queue: Default::default(),
             management_receiver,
             manager: manager.clone(),
             handle_listener,
@@ -171,7 +168,7 @@ impl ConnectionPoolWorker {
 
         loop {
             let task = tokio::select! {
-                Some(request) = self.request_receiver.recv(), if self.can_service_connection_request() => {
+                Some(request) = self.request_receiver.recv() => {
                     PoolTask::CheckOut(request)
                 },
                 Some(request) = self.management_receiver.recv() => request.into(),
@@ -189,12 +186,18 @@ impl ConnectionPoolWorker {
             };
 
             match task {
-                PoolTask::CheckOut(result_sender) => self.check_out(result_sender).await,
+                PoolTask::CheckOut(request) => self.wait_queue.push_back(request),
                 PoolTask::CheckIn(connection) => self.check_in(connection),
                 PoolTask::Clear => self.clear(),
                 PoolTask::HandleConnectionSucceeded(c) => self.handle_connection_succeeded(c),
                 PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
                 PoolTask::Maintenance => self.perform_maintenance(),
+            }
+
+            if self.can_service_connection_request() {
+                if let Some(request) = self.wait_queue.pop_front() {
+                    self.check_out(request).await;
+                }
             }
         }
 
@@ -347,6 +350,11 @@ impl ConnectionPoolWorker {
 
     fn clear(&mut self) {
         self.generation += 1;
+        for request in self.wait_queue.drain(..) {
+            println!("fulfilling requests");
+            let o = request.fulfill(RequestedConnection::PoolCleared);
+            println!("{:?}", o);
+        }
         self.emit_event(|handler| {
             let event = PoolClearedEvent {
                 address: self.address.clone(),

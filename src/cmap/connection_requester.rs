@@ -66,6 +66,9 @@ impl ConnectionRequester {
         match response {
             Ok(RequestedConnection::Pooled(c)) => Ok(c),
             Ok(RequestedConnection::Establishing(task)) => task.await,
+            Ok(RequestedConnection::PoolCleared) => {
+                Err(ErrorKind::Io(std::io::ErrorKind::Interrupted.into()).into())
+            }
             Err(e) => Err(e),
         }
     }
@@ -131,6 +134,10 @@ pub(super) enum RequestedConnection {
     /// A new connection in the process of being established.
     /// The handle can be awaited upon to receive the established connection.
     Establishing(AsyncJoinHandle<Result<Connection>>),
+
+    /// The request was rejected because the pool was cleared before it could
+    /// be fulfilled.
+    PoolCleared,
 }
 
 impl RequestedConnection {
