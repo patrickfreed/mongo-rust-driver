@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use self::server::Server;
 use super::{
@@ -275,7 +275,8 @@ impl Topology {
         // Because we're calling clone on the lock guard, we're actually copying the TopologyState
         // itself, not just making a new reference to it. The `servers` field will contain
         // references to the same instances though, since each is wrapped in an `Arc`.
-        let mut state_clone = self.state.read().await.clone();
+        let mut guard = self.state.write().await;
+        let mut state_clone = guard.clone();
 
         // TODO RUST-232: Theoretically, `TopologyDescription::update` can return an error. However,
         // this can only happen if we try to access a field from the isMaster response when an error
@@ -284,7 +285,7 @@ impl Topology {
         // descriptions when errors occur. Once we implement SDAM monitoring, we can
         // properly inform users of errors that occur here.
         if let Ok(diff) = state_clone.update(server_description, &self.common.options) {
-            self.update_state(diff, state_clone).await
+            self.update_state(diff, state_clone, guard).await
         } else {
             false
         }
@@ -315,17 +316,18 @@ impl Topology {
     /// changed. Monitoring theads will be started for any new servers added, and the monitoring
     /// threads for servers removed will stop the next time they wake up due to the strong
     /// references in the TopologyState having been dropped.
-    pub(crate) async fn update_state(
+    pub(crate) async fn update_state<'a>(
         &self,
         diff: Option<TopologyDescriptionDiff>,
         mut new_state: TopologyState,
+        mut state_lock: RwLockWriteGuard<'a, TopologyState>,
     ) -> bool {
         match diff {
             None => false,
             Some(diff) => {
-                // Now that we have the proper state in the copy, acquire a lock on the proper
-                // topology and move the info over.
-                let mut state_lock = self.state.write().await;
+                // // Now that we have the proper state in the copy, acquire a lock on the proper
+                // // topology and move the info over.
+                // let mut state_lock = self.state.write().await;
 
                 // Advance the new state's cluster time in case the topology had been updated with a
                 // newer one since the new state was created.

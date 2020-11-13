@@ -102,9 +102,10 @@ impl SrvPollingMonitor {
 
         self.rescan_interval = lookup.min_ttl;
 
-        let diff =
-            topology_state.update_hosts(&lookup.hosts.into_iter().collect(), &self.client_options);
-        topology.update_state(diff, topology_state).await;
+        todo!()
+        // let diff =
+        //     topology_state.update_hosts(&lookup.hosts.into_iter().collect(),
+        // &self.client_options); topology.update_state(diff, topology_state).await;
     }
 
     async fn lookup_hosts(&mut self) -> Result<LookupHosts> {

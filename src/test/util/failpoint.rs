@@ -4,7 +4,12 @@ use std::time::Duration;
 use typed_builder::TypedBuilder;
 
 use super::TestClient;
-use crate::{error::Result, operation::append_options, RUNTIME};
+use crate::{
+    error::Result,
+    operation::append_options,
+    selection_criteria::SelectionCriteria,
+    RUNTIME,
+};
 
 #[derive(Debug)]
 pub struct FailPoint {
@@ -37,14 +42,20 @@ impl FailPoint {
         FailPoint { command }
     }
 
-    pub(super) async fn enable(self, client: &TestClient) -> Result<FailPointGuard> {
+    pub(super) async fn enable(
+        self,
+        client: &TestClient,
+        criteria: impl Into<Option<SelectionCriteria>>,
+    ) -> Result<FailPointGuard> {
+        let criteria = criteria.into();
         client
             .database("admin")
-            .run_command(self.command.clone(), None)
+            .run_command(self.command.clone(), criteria.clone())
             .await?;
         Ok(FailPointGuard {
             failpoint_name: self.name().to_string(),
             client: client.clone(),
+            criteria,
         })
     }
 }
@@ -52,6 +63,7 @@ impl FailPoint {
 pub struct FailPointGuard {
     client: TestClient,
     failpoint_name: String,
+    criteria: Option<SelectionCriteria>,
 }
 
 impl Drop for FailPointGuard {
