@@ -363,10 +363,6 @@ async fn cmap_spec_tests() {
             return;
         }
 
-        if !test_file.description.contains("(new)") {
-            return;
-        }
-
         let _guard: RwLockWriteGuard<()> = LOCK.run_exclusively().await;
 
         let mut options = CLIENT_OPTIONS.clone();

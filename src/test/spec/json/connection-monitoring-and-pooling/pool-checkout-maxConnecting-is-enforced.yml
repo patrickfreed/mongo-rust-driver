@@ -18,6 +18,7 @@ poolOptions:
   maxPoolSize: 10
   waitQueueTimeoutMS: 5000
 operations:
+  - name: ready
   # start creating a Connection. This will take a while
   # due to the fail point.
   - name: start
@@ -74,3 +75,4 @@ ignore:
   - ConnectionCheckedOut
   - ConnectionClosed
   - ConnectionPoolCreated
+  - ConnectionPoolReady
