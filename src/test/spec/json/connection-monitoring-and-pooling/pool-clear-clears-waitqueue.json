@@ -1,12 +1,15 @@
 {
   "version": 1,
   "style": "unit",
-  "description": "clearing pool clears the WaitQueue",
+  "description": "clearing pool clears the WaitQueue (new)",
   "poolOptions": {
     "maxPoolSize": 1,
-    "waitQueueTimeoutMS": 5000
+    "waitQueueTimeoutMS": 1000
   },
   "operations": [
+    {
+      "name": "ready"
+    },
     {
       "name": "checkOut"
     },
@@ -34,11 +37,6 @@
       "name": "checkOut",
       "thread": "thread3"
     },
-      {
-          "name": "waitForEvent",
-          "event": "ConnectionCheckOutStarted",
-          "count": 3
-      },
     {
       "name": "clear"
     }
@@ -85,6 +83,7 @@
     }
   ],
   "ignore": [
+    "ConnectionPoolReady",
     "ConnectionPoolCreated",
     "ConnectionCreated",
     "ConnectionReady"

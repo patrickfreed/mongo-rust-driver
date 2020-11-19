@@ -147,7 +147,7 @@ impl ConnectionPool {
         self.manager.clear();
     }
 
-    pub(crate) fn open(&self) {
+    pub(crate) fn ready(&self) {
         self.manager.open();
     }
 }

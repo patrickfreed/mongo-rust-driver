@@ -22,6 +22,7 @@ use crate::{
         ConnectionClosedReason,
         PoolClearedEvent,
         PoolClosedEvent,
+        PoolReadyEvent,
     },
     options::StreamAddress,
     runtime::HttpClient,
@@ -209,7 +210,7 @@ impl ConnectionPoolWorker {
                 },
                 PoolTask::CheckIn(connection) => self.check_in(connection),
                 PoolTask::Clear => self.clear(),
-                PoolTask::Open => self.state = PoolState::Open,
+                PoolTask::Open => self.mark_as_ready(),
                 PoolTask::HandleConnectionSucceeded(c) => self.handle_connection_succeeded(c),
                 PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
                 PoolTask::Maintenance => self.perform_maintenance(),
@@ -390,6 +391,21 @@ impl ConnectionPoolWorker {
             };
 
             handler.handle_pool_cleared_event(event);
+        });
+    }
+
+    fn mark_as_ready(&mut self) {
+        if matches!(self.state, PoolState::Open) {
+            return;
+        }
+
+        self.state = PoolState::Open;
+        self.emit_event(|handler| {
+            let event = PoolReadyEvent {
+                address: self.address.clone(),
+            };
+
+            handler.handle_pool_ready_event(event);
         });
     }
 

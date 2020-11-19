@@ -120,8 +120,6 @@ impl Executor {
             Default::default(),
             Some(self.pool_options),
         );
-        pool.open();
-        RUNTIME.delay_for(Duration::from_millis(500)).await;
         *self.state.pool.write().await = Some(pool);
 
         let mut error: Option<Error> = None;
@@ -207,7 +205,7 @@ impl Operation {
                 }
                 Operation::CheckOut { label } => {
                     if let Some(pool) = state.pool.read().await.deref() {
-                        let conn = pool.check_out().await.unwrap();
+                        let conn = pool.check_out().await?;
 
                         if let Some(label) = label {
                             println!("checking out {}", label);
@@ -269,6 +267,21 @@ impl Operation {
                         })
                         .await
                         .expect("did not receive ConnectionPoolClosed event after closing pool");
+                }
+                Operation::Ready => {
+                    let mut subscriber = state.handler.subscribe();
+
+                    if let Some(pool) = state.pool.read().await.deref() {
+                        pool.ready();
+                    }
+
+                    // wait for event to be emitted to ensure pool is ready.
+                    subscriber
+                        .wait_for_event(EVENT_TIMEOUT, |e| {
+                            matches!(e, Event::ConnectionPoolReady(_))
+                        })
+                        .await
+                        .expect("did not receive ConnectionPoolReady event after marking pool as ready");
                 }
 
                 // We replace all instances of `Start` with `StartHelper` when we preprocess the
@@ -335,6 +348,7 @@ impl Matchable for Event {
             ) => actual.reason == expected.reason,
             (Event::ConnectionCheckOutStarted(_), Event::ConnectionCheckOutStarted(_)) => true,
             (Event::ConnectionPoolCleared(_), Event::ConnectionPoolCleared(_)) => true,
+            (Event::ConnectionPoolReady(_), Event::ConnectionPoolReady(_)) => true,
             (Event::ConnectionPoolClosed(_), Event::ConnectionPoolClosed(_)) => true,
             _ => false,
         }
@@ -346,6 +360,10 @@ impl Matchable for Event {
 async fn cmap_spec_tests() {
     async fn run_cmap_spec_tests(test_file: TestFile) {
         if TEST_DESCRIPTIONS_TO_SKIP.contains(&test_file.description.as_str()) {
+            return;
+        }
+
+        if !test_file.description.contains("(new)") {
             return;
         }
 

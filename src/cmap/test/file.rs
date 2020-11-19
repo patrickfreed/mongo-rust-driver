@@ -62,6 +62,7 @@ pub enum Operation {
     },
     Clear,
     Close,
+    Ready,
 
     // In order to execute a `Start` operation, we need to know all of the operations that should
     // execute in the context of that thread. To achieve this, we preprocess the operations

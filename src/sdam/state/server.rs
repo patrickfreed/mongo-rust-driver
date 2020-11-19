@@ -43,6 +43,6 @@ impl Server {
 
     /// Opens the connection pool associated with the server.
     pub(crate) fn open_connection_pool(&self) {
-        self.pool.open();
+        self.pool.ready();
     }
 }

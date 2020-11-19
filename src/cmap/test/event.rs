@@ -44,6 +44,10 @@ impl CmapEventHandler for EventHandler {
         self.handle(event);
     }
 
+    fn handle_pool_ready_event(&self, event: PoolReadyEvent) {
+        self.handle(event);
+    }
+
     fn handle_pool_cleared_event(&self, event: PoolClearedEvent) {
         self.handle(event);
     }
@@ -118,6 +122,7 @@ impl EventSubscriber<'_> {
 pub enum Event {
     #[serde(deserialize_with = "self::deserialize_pool_created")]
     ConnectionPoolCreated(PoolCreatedEvent),
+    ConnectionPoolReady(PoolReadyEvent),
     ConnectionPoolClosed(PoolClosedEvent),
     ConnectionCreated(ConnectionCreatedEvent),
     ConnectionReady(ConnectionReadyEvent),
@@ -134,6 +139,7 @@ impl Event {
     pub fn name(&self) -> &'static str {
         match self {
             Event::ConnectionPoolCreated(_) => "ConnectionPoolCreated",
+            Event::ConnectionPoolReady(_) => "ConnectionPoolReady",
             Event::ConnectionPoolClosed(_) => "ConnectionPoolClosed",
             Event::ConnectionCreated(_) => "ConnectionCreated",
             Event::ConnectionReady(_) => "ConnectionReady",
