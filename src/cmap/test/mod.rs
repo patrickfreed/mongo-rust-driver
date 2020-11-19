@@ -120,6 +120,8 @@ impl Executor {
             Default::default(),
             Some(self.pool_options),
         );
+        pool.open();
+        RUNTIME.delay_for(Duration::from_millis(500)).await;
         *self.state.pool.write().await = Some(pool);
 
         let mut error: Option<Error> = None;
@@ -205,9 +207,10 @@ impl Operation {
                 }
                 Operation::CheckOut { label } => {
                     if let Some(pool) = state.pool.read().await.deref() {
-                        let conn = pool.check_out().await?;
+                        let conn = pool.check_out().await.unwrap();
 
                         if let Some(label) = label {
+                            println!("checking out {}", label);
                             state.connections.write().await.insert(label, conn);
                         } else {
                             state.unlabeled_connections.lock().await.push(conn);
@@ -215,6 +218,7 @@ impl Operation {
                     }
                 }
                 Operation::CheckIn { connection } => {
+                    println!("checkin in {}", connection);
                     let mut subscriber = state.handler.subscribe();
                     let conn = state.connections.write().await.remove(&connection).unwrap();
                     let id = conn.id;

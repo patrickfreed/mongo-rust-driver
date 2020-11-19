@@ -14,12 +14,15 @@ use derivative::Derivative;
 
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
-use self::options::ConnectionPoolOptions;
+use self::{connection_requester::ConnectionRequestResult, options::ConnectionPoolOptions};
 use crate::{
-    error::{ErrorKind, Result},
+    error::{Error, ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler, ConnectionCheckoutFailedEvent, ConnectionCheckoutFailedReason,
-        ConnectionCheckoutStartedEvent, PoolCreatedEvent,
+        CmapEventHandler,
+        ConnectionCheckoutFailedEvent,
+        ConnectionCheckoutFailedReason,
+        ConnectionCheckoutStartedEvent,
+        PoolCreatedEvent,
     },
     options::StreamAddress,
     runtime::HttpClient,
@@ -95,12 +98,22 @@ impl ConnectionPool {
             handler.handle_connection_checkout_started_event(event);
         });
 
-        println!("{:?}", self.wait_queue_timeout);
-
-        let conn = self
+        let response = self
             .connection_requester
             .request(self.wait_queue_timeout)
             .await;
+
+        let conn = match response {
+            Some(ConnectionRequestResult::Pooled(c)) => Ok(c),
+            Some(ConnectionRequestResult::Establishing(task)) => task.await,
+            Some(ConnectionRequestResult::PoolCleared) => {
+                Err(Error::pool_cleared_error(&self.address))
+            }
+            None => Err(ErrorKind::WaitQueueTimeoutError {
+                address: self.address.clone(),
+            }
+            .into()),
+        };
 
         match conn {
             Ok(ref conn) => {
@@ -132,5 +145,9 @@ impl ConnectionPool {
     /// the pool, they are left for the background thread to clean up.
     pub(crate) fn clear(&self) {
         self.manager.clear();
+    }
+
+    pub(crate) fn open(&self) {
+        self.manager.open();
     }
 }

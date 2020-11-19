@@ -21,6 +21,11 @@ impl PoolManager {
         let _ = self.sender.send(PoolManagementRequest::Clear);
     }
 
+    /// Open the pool.
+    pub(super) fn open(&self) {
+        let _ = self.sender.send(PoolManagementRequest::Open);
+    }
+
     /// Check in the given connection to the pool.
     /// This returns an error containing the connection if the pool has been dropped already.
     pub(crate) fn check_in(&self, connection: Connection) -> std::result::Result<(), Connection> {
@@ -60,6 +65,7 @@ impl ManagementRequestReceiver {
 #[derive(Debug)]
 pub(super) enum PoolManagementRequest {
     Clear,
+    Open,
     CheckIn(Connection),
     HandleConnectionFailed(Error),
     HandleConnectionSucceeded(Option<Connection>),

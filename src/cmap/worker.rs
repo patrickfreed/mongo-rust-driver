@@ -3,17 +3,24 @@ use derivative::Derivative;
 use super::{
     conn::PendingConnection,
     connection_requester::{
-        ConnectionRequest, ConnectionRequestReceiver, ConnectionRequester, RequestedConnection,
+        ConnectionRequest,
+        ConnectionRequestReceiver,
+        ConnectionRequestResult,
+        ConnectionRequester,
     },
     establish::ConnectionEstablisher,
     manager::{ManagementRequestReceiver, PoolManagementRequest, PoolManager},
     options::{ConnectionOptions, ConnectionPoolOptions},
-    Connection, DEFAULT_MAX_POOL_SIZE,
+    Connection,
+    DEFAULT_MAX_POOL_SIZE,
 };
 use crate::{
     error::{Error, Result},
     event::cmap::{
-        CmapEventHandler, ConnectionClosedEvent, ConnectionClosedReason, PoolClearedEvent,
+        CmapEventHandler,
+        ConnectionClosedEvent,
+        ConnectionClosedReason,
+        PoolClearedEvent,
         PoolClosedEvent,
     },
     options::StreamAddress,
@@ -32,6 +39,10 @@ const MAX_CONNECTING: u32 = 2;
 pub(crate) struct ConnectionPoolWorker {
     /// The address the pool's connections will connect to.
     address: StreamAddress,
+
+    /// Current state of the pool. Determines if connections may be checked out
+    /// and if min_pool_size connection creation should continue.
+    state: PoolState,
 
     /// The total number of connections managed by the pool, including connections which are
     /// currently checked out of the pool or have yet to be established.
@@ -151,6 +162,7 @@ impl ConnectionPoolWorker {
             management_receiver,
             manager: manager.clone(),
             handle_listener,
+            state: PoolState::Paused,
         };
 
         RUNTIME.execute(async move {
@@ -186,9 +198,18 @@ impl ConnectionPoolWorker {
             };
 
             match task {
-                PoolTask::CheckOut(request) => self.wait_queue.push_back(request),
+                PoolTask::CheckOut(request) => match self.state {
+                    PoolState::Open => {
+                        self.wait_queue.push_back(request);
+                    }
+                    PoolState::Paused => {
+                        // if receiver doesn't listen to error that's ok.
+                        let _ = request.fulfill(ConnectionRequestResult::PoolCleared);
+                    }
+                },
                 PoolTask::CheckIn(connection) => self.check_in(connection),
                 PoolTask::Clear => self.clear(),
+                PoolTask::Open => self.state = PoolState::Open,
                 PoolTask::HandleConnectionSucceeded(c) => self.handle_connection_succeeded(c),
                 PoolTask::HandleConnectionFailed(error) => self.handle_connection_failed(error),
                 PoolTask::Maintenance => self.perform_maintenance(),
@@ -213,9 +234,16 @@ impl ConnectionPoolWorker {
     }
 
     fn can_service_connection_request(&self) -> bool {
-        (self.total_connection_count < self.max_pool_size
-            && self.pending_connection_count < MAX_CONNECTING)
-            || !self.available_connections.is_empty()
+        if !matches!(self.state, PoolState::Open) {
+            return false;
+        }
+
+        if !self.available_connections.is_empty() {
+            return true;
+        }
+
+        self.total_connection_count < self.max_pool_size
+            && self.pending_connection_count < MAX_CONNECTING
     }
 
     async fn check_out(&mut self, request: ConnectionRequest) {
@@ -234,7 +262,7 @@ impl ConnectionPoolWorker {
             }
 
             conn.mark_as_in_use(self.manager.clone());
-            if let Err(request) = request.fulfill(RequestedConnection::Pooled(conn)) {
+            if let Err(request) = request.fulfill(ConnectionRequestResult::Pooled(conn)) {
                 // checking out thread stopped listening, indicating it hit the WaitQueue
                 // timeout, so we put connection back into pool.
                 let mut connection = request.unwrap_pooled_connection();
@@ -282,11 +310,11 @@ impl ConnectionPoolWorker {
             // this only fails if the other end stopped listening (e.g. due to timeout), in
             // which case we just let the connection establish in the background.
             let _: std::result::Result<_, _> =
-                request.fulfill(RequestedConnection::Establishing(handle));
+                request.fulfill(ConnectionRequestResult::Establishing(handle));
         } else {
-            // put the request in the receiver's cache so that it will be processed
+            // put the request to the the front of the wait queue so that it will be processed
             // next time a request can be processed.
-            self.request_receiver.cache_request(request);
+            self.wait_queue.push_front(request);
         }
     }
 
@@ -350,9 +378,10 @@ impl ConnectionPoolWorker {
 
     fn clear(&mut self) {
         self.generation += 1;
+        self.state = PoolState::Paused;
         for request in self.wait_queue.drain(..) {
             println!("fulfilling requests");
-            let o = request.fulfill(RequestedConnection::PoolCleared);
+            let o = request.fulfill(ConnectionRequestResult::PoolCleared);
             println!("{:?}", o);
         }
         self.emit_event(|handler| {
@@ -384,7 +413,9 @@ impl ConnectionPoolWorker {
     /// min_pool_size connections.
     fn perform_maintenance(&mut self) {
         self.remove_perished_connections();
-        self.ensure_min_connections();
+        if matches!(self.state, PoolState::Open) {
+            self.ensure_min_connections();
+        }
     }
 
     /// Iterate over the connections and remove any that are stale or idle.
@@ -468,6 +499,12 @@ async fn establish_connection(
     establish_result
 }
 
+#[derive(Debug)]
+enum PoolState {
+    Paused,
+    Open,
+}
+
 /// Task to process by the worker.
 #[derive(Debug)]
 enum PoolTask {
@@ -489,6 +526,9 @@ enum PoolTask {
 
     /// Perform pool maintenance (ensure min connections, remove stale or idle connections).
     Maintenance,
+
+    /// Open the pool if it was paused before.
+    Open,
 }
 
 impl From<PoolManagementRequest> for PoolTask {
@@ -496,6 +536,7 @@ impl From<PoolManagementRequest> for PoolTask {
         match request {
             PoolManagementRequest::CheckIn(c) => PoolTask::CheckIn(c),
             PoolManagementRequest::Clear => PoolTask::Clear,
+            PoolManagementRequest::Open => PoolTask::Open,
             PoolManagementRequest::HandleConnectionFailed(error) => {
                 PoolTask::HandleConnectionFailed(error)
             }

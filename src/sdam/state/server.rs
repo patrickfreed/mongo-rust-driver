@@ -40,4 +40,9 @@ impl Server {
     pub(crate) fn clear_connection_pool(&self) {
         self.pool.clear();
     }
+
+    /// Opens the connection pool associated with the server.
+    pub(crate) fn open_connection_pool(&self) {
+        self.pool.open();
+    }
 }

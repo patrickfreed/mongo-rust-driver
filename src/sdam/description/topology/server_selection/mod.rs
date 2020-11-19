@@ -59,7 +59,10 @@ impl TopologyDescription {
         // Similarly, if the topology type is Single, we skip the below logic as well and just
         // return the only server in the topology.
         if let TopologyType::Single = self.topology_type {
-            return Ok(self.servers.values().next());
+            return match self.servers.values().next() {
+                Some(s) if s.is_available() => Ok(Some(s)),
+                _ => Ok(None),
+            };
         }
 
         let mut suitable_servers = match criteria {

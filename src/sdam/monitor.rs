@@ -89,6 +89,16 @@ impl Monitor {
     async fn check_if_topology_changed(&mut self, topology: &Topology) -> bool {
         // Send an isMaster to the server.
         let server_description = self.check_server().await;
+
+        println!("initial type: {:?}", self.server_type);
+        println!("new type: {:?}", server_description.server_type);
+        if self.server_type == ServerType::Unknown
+            && server_description.server_type != ServerType::Unknown
+        {
+            println!("opening pool");
+            self.open_connection_pool();
+        }
+
         self.server_type = server_description.server_type;
 
         topology.update(server_description).await
@@ -100,7 +110,7 @@ impl Monitor {
         match self.perform_is_master().await {
             Ok(reply) => ServerDescription::new(address, Some(Ok(reply))),
             Err(e) => {
-                self.clear_connection_pool().await;
+                self.clear_connection_pool();
 
                 if self.server_type == ServerType::Unknown {
                     return ServerDescription::new(address, Some(Err(e)));
@@ -144,9 +154,15 @@ impl Monitor {
         Ok(self.connection.get_or_insert(connection))
     }
 
-    async fn clear_connection_pool(&self) {
+    fn clear_connection_pool(&self) {
         if let Some(server) = self.server.upgrade() {
             server.clear_connection_pool();
+        }
+    }
+
+    fn open_connection_pool(&self) {
+        if let Some(server) = self.server.upgrade() {
+            server.open_connection_pool();
         }
     }
 }
