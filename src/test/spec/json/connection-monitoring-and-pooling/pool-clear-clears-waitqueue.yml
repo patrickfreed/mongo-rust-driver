@@ -19,7 +19,7 @@ operations:
   - name: checkOut
     thread: thread2
   - name: start
-    thread: thread3 
+    target: thread3 
   - name: checkOut
     thread: thread3
   # clear the pool, ejecting the previous three threads
@@ -39,13 +39,13 @@ events:
   - type: ConnectionPoolCleared
     address: 42
   - type: ConnectionCheckOutFailed
-    reason: error
+    reason: connectionError
     address: 42
   - type: ConnectionCheckOutFailed
-    reason: error
+    reason: connectionError
     address: 42
   - type: ConnectionCheckOutFailed
-    reason: error
+    reason: connectionError
     address: 42
 ignore:
   - ConnectionPoolReady
