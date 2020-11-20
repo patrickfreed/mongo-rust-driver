@@ -378,6 +378,7 @@ impl ConnectionPoolWorker {
     }
 
     fn clear(&mut self) {
+        println!("clearing in pool");
         self.generation += 1;
         self.state = PoolState::Paused;
         for request in self.wait_queue.drain(..) {
@@ -395,6 +396,7 @@ impl ConnectionPoolWorker {
     }
 
     fn mark_as_ready(&mut self) {
+        println!("marking as ready");
         if matches!(self.state, PoolState::Open) {
             return;
         }

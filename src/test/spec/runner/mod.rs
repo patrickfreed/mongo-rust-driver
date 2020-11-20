@@ -143,7 +143,7 @@ pub async fn run_v2_test(test_file: TestFile) {
                 }
             };
             let mut operation_events: Vec<TestEvent> = client
-                .collect_events(&operation)
+                .get_command_events(operation.command_names())
                 .into_iter()
                 .map(Into::into)
                 .collect();

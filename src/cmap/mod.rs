@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test;
+pub(crate) mod test;
 
 pub(crate) mod conn;
 mod connection_requester;

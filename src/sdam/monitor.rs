@@ -1,5 +1,6 @@
 use std::{sync::Weak, time::Duration};
 
+use bson::bson;
 use time::PreciseTime;
 
 use super::{
@@ -110,20 +111,39 @@ impl Monitor {
         match self.perform_is_master().await {
             Ok(reply) => ServerDescription::new(address, Some(Ok(reply))),
             Err(e) => {
+                println!("failed {}", e);
                 self.clear_connection_pool();
 
-                if self.server_type == ServerType::Unknown {
+                if e.is_network_error() && self.server_type != ServerType::Unknown {
+                    ServerDescription::new(address, Some(self.perform_is_master().await))
+                } else {
                     return ServerDescription::new(address, Some(Err(e)));
                 }
-
-                ServerDescription::new(address, Some(self.perform_is_master().await))
             }
         }
     }
 
     async fn perform_is_master(&mut self) -> Result<IsMasterReply> {
-        let connection = self.resolve_connection().await?;
-        let result = is_master(connection).await;
+        // let connection = self.resolve_connection().await?;
+
+        let result = match self.connection {
+            Some(ref mut conn) => is_master(conn, None).await,
+            None => {
+                self.connection = Connection::connect_monitoring(
+                    self.address.clone(),
+                    self.topology.client_options().connect_timeout,
+                    self.topology.client_options().tls_options(),
+                )
+                .await?
+                .into();
+
+                is_master(
+                    self.connection.as_mut().unwrap(),
+                    self.topology.client_options().app_name.clone(),
+                )
+                .await
+            }
+        };
 
         if result
             .as_ref()
@@ -156,7 +176,10 @@ impl Monitor {
 
     fn clear_connection_pool(&self) {
         if let Some(server) = self.server.upgrade() {
+            println!("clearing server pool");
             server.clear_connection_pool();
+        } else {
+            println!("server null");
         }
     }
 
@@ -167,13 +190,20 @@ impl Monitor {
     }
 }
 
-async fn is_master(connection: &mut Connection) -> Result<IsMasterReply> {
-    let command = Command::new_read(
-        "isMaster".into(),
-        "admin".into(),
-        None,
-        doc! { "isMaster": 1 },
-    );
+async fn is_master(connection: &mut Connection, app_name: Option<String>) -> Result<IsMasterReply> {
+    let mut command_doc = doc! { "isMaster": 1 };
+    if let Some(name) = app_name {
+        command_doc.insert(
+            "client",
+            bson!({
+                "application": { "name": name },
+                "driver": { "name": "rust", "version": "1.0" },
+                "os": { "type": "linux" },
+            }),
+        );
+    }
+
+    let command = Command::new_read("isMaster".into(), "admin".into(), None, command_doc);
 
     let start_time = PreciseTime::now();
     let command_response = connection.send_command(command, None).await?;

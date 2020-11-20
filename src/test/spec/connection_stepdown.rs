@@ -102,7 +102,7 @@ async fn get_more() {
         }
 
         RUNTIME.delay_for(Duration::from_millis(250)).await;
-        assert!(client.pool_cleared_events.read().unwrap().is_empty());
+        assert!(client.get_pool_cleared_events().is_empty());
     }
 
     run_test(function_name!(), get_more_test).await;
@@ -148,7 +148,7 @@ async fn not_master_keep_pool() {
             .expect("insert should have succeeded");
 
         RUNTIME.delay_for(Duration::from_millis(250)).await;
-        assert!(client.pool_cleared_events.read().unwrap().is_empty());
+        assert!(client.get_pool_cleared_events().is_empty());
     }
 
     run_test(function_name!(), not_master_keep_pool_test).await;
@@ -190,7 +190,7 @@ async fn not_master_reset_pool() {
         );
 
         RUNTIME.delay_for(Duration::from_millis(250)).await;
-        assert!(client.pool_cleared_events.read().unwrap().len() == 1);
+        assert!(client.get_pool_cleared_events().len() == 1);
 
         coll.insert_one(doc! { "test": 1 }, None)
             .await
@@ -235,7 +235,7 @@ async fn shutdown_in_progress() {
         );
 
         RUNTIME.delay_for(Duration::from_millis(250)).await;
-        assert!(client.pool_cleared_events.read().unwrap().len() == 1);
+        assert!(client.get_pool_cleared_events().len() == 1);
 
         coll.insert_one(doc! { "test": 1 }, None)
             .await
@@ -280,7 +280,7 @@ async fn interrupted_at_shutdown() {
         );
 
         RUNTIME.delay_for(Duration::from_millis(250)).await;
-        assert!(client.pool_cleared_events.read().unwrap().len() == 1);
+        assert!(client.get_pool_cleared_events().len() == 1);
 
         coll.insert_one(doc! { "test": 1 }, None)
             .await
