@@ -13,7 +13,10 @@ use std::{sync::Arc, time::Duration};
 use derivative::Derivative;
 
 pub use self::conn::ConnectionInfo;
-pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
+pub(crate) use self::{
+    conn::{Command, CommandResponse, Connection, StreamDescription},
+    establish::handshake::{is_master, Handshaker},
+};
 use self::{connection_requester::ConnectionRequestResult, options::ConnectionPoolOptions};
 use crate::{
     error::{Error, ErrorKind, Result},

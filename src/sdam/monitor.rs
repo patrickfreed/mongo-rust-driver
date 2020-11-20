@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     bson::doc,
-    cmap::{Command, Connection},
+    cmap::{is_master, Command, Connection, Handshaker},
     error::Result,
     is_master::IsMasterReply,
     options::StreamAddress,
@@ -23,6 +23,7 @@ pub(crate) const MIN_HEARTBEAT_FREQUENCY: Duration = Duration::from_millis(500);
 pub(super) struct Monitor {
     address: StreamAddress,
     connection: Option<Connection>,
+    handshaker: Handshaker,
     server: Weak<Server>,
     server_type: ServerType,
     topology: WeakTopology,
@@ -33,12 +34,14 @@ impl Monitor {
     /// ensure that the monitoring thread doesn't keep the server alive after it's been removed
     /// from the topology or the client has been dropped.
     pub(super) fn start(address: StreamAddress, server: Weak<Server>, topology: WeakTopology) {
+        let handshaker = Handshaker::new(Some(topology.client_options().clone().into()));
         let mut monitor = Self {
             address,
             connection: None,
             server,
             server_type: ServerType::Unknown,
             topology,
+            handshaker,
         };
 
         RUNTIME.execute(async move {
@@ -124,12 +127,18 @@ impl Monitor {
     }
 
     async fn perform_is_master(&mut self) -> Result<IsMasterReply> {
-        // let connection = self.resolve_connection().await?;
-
         let result = match self.connection {
-            Some(ref mut conn) => is_master(conn, None).await,
+            Some(ref mut conn) => {
+                let command = Command::new_read(
+                    "isMaster".into(),
+                    "admin".into(),
+                    None,
+                    doc! { "isMaster": 1 },
+                );
+                is_master(command, conn).await
+            }
             None => {
-                self.connection = Connection::connect_monitoring(
+                let mut connection = Connection::connect_monitoring(
                     self.address.clone(),
                     self.topology.client_options().connect_timeout,
                     self.topology.client_options().tls_options(),
@@ -137,11 +146,13 @@ impl Monitor {
                 .await?
                 .into();
 
-                is_master(
-                    self.connection.as_mut().unwrap(),
-                    self.topology.client_options().app_name.clone(),
-                )
-                .await
+                let res = self
+                    .handshaker
+                    .handshake(&mut connection)
+                    .await
+                    .map(|r| r.is_master_reply);
+                self.connection = Some(connection);
+                res
             }
         };
 
@@ -155,23 +166,6 @@ impl Monitor {
         }
 
         result
-    }
-
-    async fn resolve_connection(&mut self) -> Result<&mut Connection> {
-        if let Some(ref mut connection) = self.connection {
-            return Ok(connection);
-        }
-
-        let connection = Connection::connect_monitoring(
-            self.address.clone(),
-            self.topology.client_options().connect_timeout,
-            self.topology.client_options().tls_options(),
-        )
-        .await?;
-
-        // Since the connection was not `Some` above, this will always insert the new connection and
-        // return a reference to it.
-        Ok(self.connection.get_or_insert(connection))
     }
 
     fn clear_connection_pool(&self) {
@@ -188,32 +182,4 @@ impl Monitor {
             server.open_connection_pool();
         }
     }
-}
-
-async fn is_master(connection: &mut Connection, app_name: Option<String>) -> Result<IsMasterReply> {
-    let mut command_doc = doc! { "isMaster": 1 };
-    if let Some(name) = app_name {
-        command_doc.insert(
-            "client",
-            bson!({
-                "application": { "name": name },
-                "driver": { "name": "rust", "version": "1.0" },
-                "os": { "type": "linux" },
-            }),
-        );
-    }
-
-    let command = Command::new_read("isMaster".into(), "admin".into(), None, command_doc);
-
-    let start_time = PreciseTime::now();
-    let command_response = connection.send_command(command, None).await?;
-    let end_time = PreciseTime::now();
-
-    command_response.validate()?;
-    let is_master_response = command_response.body()?;
-    Ok(IsMasterReply {
-        command_response: is_master_response,
-        round_trip_time: Some(start_time.to(end_time).to_std().unwrap()),
-        cluster_time: command_response.cluster_time().cloned(),
-    })
 }
