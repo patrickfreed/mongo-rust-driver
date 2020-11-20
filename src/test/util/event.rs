@@ -51,10 +51,6 @@ impl CommandEvent {
         }
     }
 
-    pub fn is_command_started(&self) -> bool {
-        matches!(self, CommandEvent::CommandStartedEvent(_))
-    }
-
     fn request_id(&self) -> i32 {
         match self {
             CommandEvent::CommandStartedEvent(event) => event.request_id,
