@@ -63,5 +63,52 @@ async fn sdam_pool_management() {
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test(threaded_scheduler))]
 #[cfg_attr(feature = "async-std-runtime", async_std::test)]
-#[function_name::named]
-async fn min_heartbeat_frequency() {}
+async fn min_heartbeat_frequency() {
+    let _guard: RwLockWriteGuard<_> = LOCK.run_exclusively().await;
+
+    let mut setup_client_options = CLIENT_OPTIONS.clone();
+    setup_client_options.hosts.drain(1..);
+    setup_client_options.direct_connection = Some(true);
+
+    let setup_client = TestClient::with_options(Some(setup_client_options.clone())).await;
+
+    if !setup_client.supports_fail_command().await {
+        println!("skipping sdam_pool_management test due to server not supporting fail points");
+        return;
+    }
+
+    let fp_options = FailCommandOptions::builder()
+        .app_name("SDAMSleepTest".to_string())
+        .error_code(1234)
+        .build();
+    let failpoint = FailPoint::fail_command(&["isMaster"], FailPointMode::Times(10), fp_options);
+
+    let _fp_guard = setup_client
+        .enable_failpoint(failpoint)
+        .await
+        .expect("enabling failpoint should succeed");
+
+    let mut options = setup_client_options;
+    options.app_name = Some("SDAMSleepTest".to_string());
+    options.server_selection_timeout = Some(Duration::from_secs(10));
+    let client = Client::with_options(options).expect("client creation succeeds");
+
+    let start = Instant::now();
+    client
+        .database("admin")
+        .run_command(doc! { "ping": 1 }, None)
+        .await
+        .expect("ping should eventually succeed");
+
+    let elapsed = Instant::now().duration_since(start).as_millis();
+    assert!(
+        elapsed >= 4500,
+        "expected to take at least 4.5 seconds, instead took {}ms",
+        elapsed
+    );
+    assert!(
+        elapsed <= 6500,
+        "expected to take at most 6.5 seconds, instead took {}ms",
+        elapsed
+    );
+}
