@@ -60,3 +60,8 @@ async fn sdam_pool_management() {
         .await
         .expect("should see pool ready event");
 }
+
+#[cfg_attr(feature = "tokio-runtime", tokio::test(threaded_scheduler))]
+#[cfg_attr(feature = "async-std-runtime", async_std::test)]
+#[function_name::named]
+async fn min_heartbeat_frequency() {}
