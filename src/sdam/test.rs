@@ -1,16 +1,21 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use bson::doc;
 use tokio::sync::RwLockWriteGuard;
 
-use crate::test::{
-    CmapEvent,
-    Event,
-    EventClient,
-    FailCommandOptions,
-    FailPoint,
-    FailPointMode,
-    CLIENT_OPTIONS,
-    LOCK,
+use crate::{
+    test::{
+        CmapEvent,
+        Event,
+        EventClient,
+        FailCommandOptions,
+        FailPoint,
+        FailPointMode,
+        TestClient,
+        CLIENT_OPTIONS,
+        LOCK,
+    },
+    Client,
 };
 
 #[cfg_attr(feature = "tokio-runtime", tokio::test(threaded_scheduler))]
