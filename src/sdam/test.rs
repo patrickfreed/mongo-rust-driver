@@ -86,7 +86,7 @@ async fn min_heartbeat_frequency() {
         .app_name("SDAMSleepTest".to_string())
         .error_code(1234)
         .build();
-    let failpoint = FailPoint::fail_command(&["isMaster"], FailPointMode::Times(10), fp_options);
+    let failpoint = FailPoint::fail_command(&["isMaster"], FailPointMode::Times(5), fp_options);
 
     let _fp_guard = setup_client
         .enable_failpoint(failpoint)
@@ -107,13 +107,13 @@ async fn min_heartbeat_frequency() {
 
     let elapsed = Instant::now().duration_since(start).as_millis();
     assert!(
-        elapsed >= 4500,
-        "expected to take at least 4.5 seconds, instead took {}ms",
+        elapsed >= 2000,
+        "expected to take at least 2 seconds, instead took {}ms",
         elapsed
     );
     assert!(
-        elapsed <= 6500,
-        "expected to take at most 6.5 seconds, instead took {}ms",
+        elapsed <= 3500,
+        "expected to take at most 3.5 seconds, instead took {}ms",
         elapsed
     );
 }
