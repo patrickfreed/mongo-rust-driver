@@ -68,10 +68,10 @@ where
             serde_json::from_reader(File::open(test_file_full_path.as_path()).unwrap()).unwrap();
 
         // Printing the name of the test file makes it easier to debug deserialization errors.
-        println!(
-            "Running tests from {}",
-            test_file_full_path.display().to_string()
-        );
+        // println!(
+        //     "Running tests from {}",
+        //     test_file_full_path.display().to_string()
+        // );
 
         run_test_file(
             bson::from_bson(

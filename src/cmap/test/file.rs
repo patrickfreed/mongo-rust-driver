@@ -48,10 +48,19 @@ impl ThreadedOperation {
             Some(thread_name) => {
                 let threads = state.threads.read().await;
                 let thread = threads.get(&thread_name).unwrap();
+                println!("CMAP OP: dispatching {:?} to {}", self.type_, thread_name);
                 thread.dispatcher.send(self.type_).unwrap();
                 Ok(())
             }
-            None => self.type_.execute(state).await,
+            None => {
+                println!("CMAP OP: executing {:?} on main thread", self.type_);
+                let out = self.type_.execute(state).await;
+                println!(
+                    "CMAP OP: finished executing on main thread, result={:?}",
+                    out
+                );
+                out
+            }
         }
     }
 }

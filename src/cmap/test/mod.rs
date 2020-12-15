@@ -93,8 +93,11 @@ impl CmapThread {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Operation>();
         let handle = RUNTIME
             .spawn(async move {
+                println!("thread started");
                 while let Some(operation) = receiver.recv().await {
+                    println!("got operation {:?}", operation);
                     operation.execute(state.clone()).await?;
+                    println!("operation done");
                 }
                 Ok(())
             })
@@ -222,9 +225,15 @@ impl Operation {
                 count,
                 timeout,
             } => {
+                println!("waiting for {} {} event(s)", count, event);
                 let event_name = event.clone();
+                let s = state.clone();
                 let task = async move {
-                    while state.count_events(&event) < count {
+                    while s.count_events(&event) < count {
+                        println!(
+                            "did not see {} {} event(s) sleeping for 100ms",
+                            count, event
+                        );
                         RUNTIME.delay_for(Duration::from_millis(100)).await;
                     }
                 };
@@ -232,13 +241,32 @@ impl Operation {
                     .timeout(timeout.unwrap_or(EVENT_TIMEOUT), task)
                     .await
                     .unwrap_or_else(|_| {
-                        panic!("waiting for {} {} event(s) timed out", count, event_name)
+                        panic!(
+                            "waiting for {} {} event(s) timed out, events: {:?}",
+                            count,
+                            event_name,
+                            state
+                                .handler
+                                .events
+                                .read()
+                                .unwrap()
+                                .iter()
+                                .collect::<Vec<&Event>>()
+                        )
                     });
+                println!("found events!");
             }
             Operation::CheckOut { label } => {
+                println!("cmap Operation::CheckOut: acquiring pool lock");
                 if let Some(pool) = state.pool.read().await.deref() {
+                    println!("cmap Operation::CheckOut: callig check_out");
                     let conn = pool.check_out().await?;
+                    println!("cmap Operation::CheckOut: check_out worked id={}", conn.id);
 
+                    println!(
+                        "cmap Operation::CheckOut: storing id={} as {:?}",
+                        conn.id, label
+                    );
                     if let Some(label) = label {
                         state.connections.write().await.insert(label, conn);
                     } else {
@@ -268,9 +296,12 @@ impl Operation {
                     });
             }
             Operation::Clear => {
+                println!("Operation::Clear: getting pool read lock");
                 if let Some(pool) = state.pool.read().await.as_ref() {
+                    println!("Operation::Clear: got pool read lock, clearing");
                     let mut subscriber = pool.subscribe_to_generation_updates();
                     pool.clear();
+                    println!("Operation::Clear: clear done, waiting for event");
 
                     subscriber
                         .wait_for_generation_change(EVENT_TIMEOUT)
@@ -298,6 +329,7 @@ impl Operation {
                     .expect("did not receive ConnectionPoolClosed event after closing pool");
             }
             Operation::Start { target } => {
+                println!("Operation::Start: starting thread {}", target);
                 state
                     .threads
                     .write()

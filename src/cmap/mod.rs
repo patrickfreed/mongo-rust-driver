@@ -109,6 +109,8 @@ impl ConnectionPool {
     {
         if let Some(ref handler) = self.event_handler {
             emit(handler);
+        } else {
+            println!("no handler")
         }
     }
 
@@ -118,18 +120,23 @@ impl ConnectionPool {
     /// blocks for longer than `wait_queue_timeout` waiting for an available connection or to
     /// start establishing a new one, a `WaitQueueTimeoutError` will be returned.
     pub(crate) async fn check_out(&self) -> Result<Connection> {
+        println!("entered ConnectionPool::check_out");
         self.emit_event(|handler| {
             let event = ConnectionCheckoutStartedEvent {
                 address: self.address.clone(),
             };
 
+            println!("invoking handler for checkout started event");
             handler.handle_connection_checkout_started_event(event);
         });
 
+        println!("requesting connection");
         let response = self
             .connection_requester
             .request(self.wait_queue_timeout)
             .await;
+
+        println!("got connection request response {:?}", response);
 
         let conn = match response {
             Some(ConnectionRequestResult::Pooled(c)) => Ok(c),
@@ -143,11 +150,16 @@ impl ConnectionPool {
             .into()),
         };
 
+        println!("conn={:?}", conn);
+
         match conn {
             Ok(ref conn) => {
+                println!("emitting checked out event");
                 self.emit_event(|handler| {
+                    println!("invoking handler for checkout checked out event");
                     handler.handle_connection_checked_out_event(conn.checked_out_event());
                 });
+                println!("event emitted");
             }
             Err(ref e) => {
                 let failure_reason =
@@ -157,12 +169,19 @@ impl ConnectionPool {
                         ConnectionCheckoutFailedReason::ConnectionError
                     };
 
+                println!("checkout failed {:?} => {:?}", e, failure_reason);
+                println!("about to emit check out failed event");
                 self.emit_event(|handler| {
-                    handler.handle_connection_checkout_failed_event(ConnectionCheckoutFailedEvent {
-                        address: self.address.clone(),
-                        reason: failure_reason,
-                    })
+                    println!("inside check out failed event emitter, calling handler");
+                    handler.handle_connection_checkout_failed_event(
+                        ConnectionCheckoutFailedEvent {
+                            address: self.address.clone(),
+                            reason: failure_reason,
+                        },
+                    );
+                    println!("handler call compelted");
                 });
+                println!("check out failed event emitted");
             }
         }
 
@@ -172,12 +191,16 @@ impl ConnectionPool {
     /// Increments the generation of the pool. Rather than eagerly removing stale connections from
     /// the pool, they are left for the background thread to clean up.
     pub(crate) fn clear(&self) {
+        println!("in ConnectionPool::clear, invoking manager");
         self.manager.clear();
+        println!("clear invoked");
     }
 
     /// Mark the pool as "ready", allowing connections to be created and checked out.
     pub(crate) async fn mark_as_ready(&self) {
+        println!("in ConnectionPool::mark_as_ready, invoking manager");
         self.manager.mark_as_ready().await;
+        println!("mark as ready done");
     }
 
     /// Subscribe to updates to the pool's generation.

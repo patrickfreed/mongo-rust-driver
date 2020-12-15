@@ -232,12 +232,16 @@ impl ConnectionPoolWorker {
                 }
             };
 
+            println!("{}: got task {:?}", self.address, task);
+
             match task {
                 PoolTask::CheckOut(request) => match self.state {
                     PoolState::Ready => {
+                        println!("pushing to wait queue");
                         self.wait_queue.push_back(request);
                     }
                     PoolState::Paused => {
+                        println!("pool closed, fulfilling with poolcleared error");
                         // if receiver doesn't listen to error that's ok.
                         let _ = request.fulfill(ConnectionRequestResult::PoolCleared);
                     }
@@ -297,6 +301,7 @@ impl ConnectionPoolWorker {
     }
 
     async fn check_out(&mut self, request: ConnectionRequest) {
+        println!("In ConnectionPoolWorker::check_out");
         // first attempt to check out an available connection
         while let Some(mut conn) = self.available_connections.pop_back() {
             // Close the connection if it's stale.
@@ -311,11 +316,16 @@ impl ConnectionPoolWorker {
                 continue;
             }
 
+            println!("fulfilling request with connection id={}", conn.id);
             conn.mark_as_in_use(self.manager.clone());
             if let Err(request) = request.fulfill(ConnectionRequestResult::Pooled(conn)) {
                 // checking out thread stopped listening, indicating it hit the WaitQueue
                 // timeout, so we put connection back into pool.
                 let mut connection = request.unwrap_pooled_connection();
+                println!(
+                    "request hung up for id={}, returning to pool",
+                    connection.id
+                );
                 connection.mark_as_available();
                 self.available_connections.push_back(connection);
             }
@@ -330,7 +340,9 @@ impl ConnectionPoolWorker {
             let pending_connection = self.create_pending_connection();
             let manager = self.manager.clone();
 
+            println!("spawning task to establish connection");
             let handle = RUNTIME.spawn(async move {
+                println!("beginning establishment");
                 let mut establish_result = establish_connection(
                     &establisher,
                     pending_connection,
@@ -338,6 +350,7 @@ impl ConnectionPoolWorker {
                     event_handler.as_ref(),
                 )
                 .await;
+                println!("establishment finished");
 
                 if let Ok(ref mut c) = establish_result {
                     c.mark_as_in_use(manager.clone());
@@ -410,30 +423,39 @@ impl ConnectionPoolWorker {
     }
 
     fn check_in(&mut self, mut conn: Connection) {
+        println!("worker checking in id={}", conn.id);
         self.emit_event(|handler| {
             handler.handle_connection_checked_in_event(conn.checked_in_event());
         });
+        println!("emitted check in event id={}", conn.id);
 
         conn.mark_as_available();
 
         if conn.has_errored() {
+            println!("closing id={} for error", conn.id);
             self.close_connection(conn, ConnectionClosedReason::Error);
         } else if conn.is_stale(self.generation) {
+            println!("closing id={} for stale", conn.id);
             self.close_connection(conn, ConnectionClosedReason::Stale);
         } else if conn.is_executing() {
             self.close_connection(conn, ConnectionClosedReason::Dropped)
         } else {
+            println!("checking id={} back in", conn.id);
             self.available_connections.push_back(conn);
         }
     }
 
     fn clear(&mut self, establishment_error: Option<Error>) {
+        println!("worker clear");
         self.generation += 1;
         let previous_state = std::mem::replace(&mut self.state, PoolState::Paused);
+        println!("publishing new generation");
         self.generation_publisher
             .publish(self.generation, establishment_error);
+        println!("new generation published");
 
         if !matches!(previous_state, PoolState::Paused) {
+            println!("emitting pool cleared event");
             self.emit_event(|handler| {
                 let event = PoolClearedEvent {
                     address: self.address.clone(),
@@ -441,13 +463,18 @@ impl ConnectionPoolWorker {
 
                 handler.handle_pool_cleared_event(event);
             });
+            println!("pool cleared event done");
 
+            println!("clearing wait queue");
             for request in self.wait_queue.drain(..) {
+                println!("evicting {:?}", request);
                 // an error means the other end hung up already, which is okay because we were
                 // returning an error anyways
                 let _: std::result::Result<_, _> =
                     request.fulfill(ConnectionRequestResult::PoolCleared);
+                println!("evicting done");
             }
+            println!("done clearing wait queue");
         }
     }
 
@@ -553,19 +580,24 @@ async fn establish_connection(
 
     match establish_result {
         Err(ref e) => {
+            println!("establishment failed id={}", connection_id);
             if let Some(handler) = event_handler {
                 let event = ConnectionClosedEvent {
                     address,
                     reason: ConnectionClosedReason::Error,
                     connection_id,
                 };
+                println!("invoking handler for closed event id={}", connection_id);
                 handler.handle_connection_closed_event(event);
             }
+            println!("calling handle_connenction_failed id={}", connection_id);
             manager.handle_connection_failed(e.clone(), generation);
         }
         Ok(ref mut connection) => {
             if let Some(handler) = event_handler {
-                handler.handle_connection_ready_event(connection.ready_event())
+                println!("callling handle_connection ready id={}", connection_id);
+                handler.handle_connection_ready_event(connection.ready_event());
+                println!("handle_connection ready done id={}", connection_id);
             };
         }
     }
