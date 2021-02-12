@@ -5,7 +5,9 @@ set -o errexit
 . ~/.cargo/env
 
 if [ "$SINGLE_THREAD" = true ]; then
-	OPTIONS="-- --test-threads=1"
+	OPTIONS="-- --test-threads=1 --nocapture"
+else
+    OPTIONS="-- --nocapture"
 fi
 
 echo "cargo test options: ${OPTIONS}"

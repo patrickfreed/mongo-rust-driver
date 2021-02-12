@@ -59,17 +59,20 @@ async fn min_heartbeat_frequency() {
 
     let mut options = setup_client_options;
     options.app_name = Some("SDAMMinHeartbeatFrequencyTest".to_string());
-    options.server_selection_timeout = Some(Duration::from_secs(5));
+    options.server_selection_timeout = Some(Duration::from_secs(4));
     let client = Client::with_options(options).expect("client creation succeeds");
 
     let start = Instant::now();
-    client
+    let result = client
         .database("admin")
         .run_command(doc! { "ping": 1 }, None)
-        .await
-        .expect("ping should eventually succeed");
+        .await;
+    // .expect("ping should eventually succeed");
 
     let elapsed = Instant::now().duration_since(start).as_millis();
+    println!("elapsed: {}ms", elapsed);
+
+    result.expect("ping should eventually succeed");
     assert!(
         elapsed >= 2000,
         "expected to take at least 2 seconds, instead took {}ms",
